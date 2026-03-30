@@ -416,6 +416,18 @@ export function deleteDomain(domain: string): boolean {
   return domains.delete(normalized);
 }
 
+export function updateDomain(
+  domain: string,
+  data: Partial<Pick<CustomDomain, "linkedSlug" | "verified">>
+): CustomDomain | null {
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const cd = domains.get(normalized);
+  if (!cd) return null;
+  if (data.linkedSlug !== undefined) cd.linkedSlug = data.linkedSlug;
+  if (data.verified !== undefined) cd.verified = data.verified;
+  return cd;
+}
+
 export function getVerificationCode(domain: string): string {
   const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
   const cd = domains.get(normalized);

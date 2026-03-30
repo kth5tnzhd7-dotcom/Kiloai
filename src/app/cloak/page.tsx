@@ -684,21 +684,22 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
       )}
 
       <form onSubmit={handleAdd} className="flex flex-col md:flex-row gap-3 mb-6">
-        <input
-          type="text"
-          required
-          placeholder="yourdomain.com"
-          value={newDomain}
-          onChange={(e) => setNewDomain(e.target.value)}
-          className="flex-1 px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
-        />
+        <div className="flex-1">
+          <input
+            type="text"
+            required
+            placeholder="yourdomain.com"
+            value={newDomain}
+            onChange={(e) => setNewDomain(e.target.value)}
+            className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+          />
+        </div>
         <select
-          required
           value={linkedSlug}
           onChange={(e) => setLinkedSlug(e.target.value)}
           className="px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
         >
-          <option value="">Select a link...</option>
+          <option value="">No link (can assign later)</option>
           {links.map((l) => (
             <option key={l.slug} value={l.slug}>
               /s/{l.slug} — {l.whitePageTitle}
@@ -707,10 +708,10 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
         </select>
         <button
           type="submit"
-          disabled={loading || !newDomain || !linkedSlug}
+          disabled={loading || !newDomain}
           className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
         >
-          {loading ? "Adding..." : "Add Domain"}
+          {loading ? "Adding..." : "Create Domain"}
         </button>
       </form>
 
@@ -748,27 +749,25 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {!d.verified && (
-                    <>
-                      <button
-                        onClick={() =>
-                          setShowInstructions(
-                            showInstructions === d.domain ? null : d.domain
-                          )
-                        }
-                        className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
-                      >
-                        {showInstructions === d.domain
-                          ? "Hide DNS Setup"
-                          : "DNS Setup"}
-                      </button>
-                      <button
-                        onClick={() => handleVerify(d.domain)}
-                        disabled={verifying === d.domain}
-                        className="px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors disabled:opacity-50"
-                      >
-                        {verifying === d.domain ? "Verifying..." : "Verify Now"}
-                      </button>
-                    </>
+                    <button
+                      onClick={() => handleVerify(d.domain)}
+                      disabled={verifying === d.domain}
+                      className="px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors disabled:opacity-50"
+                    >
+                      {verifying === d.domain ? "Verifying..." : "Verify Now"}
+                    </button>
+                  )}
+                  {d.verified && (
+                    <button
+                      onClick={() =>
+                        setShowInstructions(
+                          showInstructions === d.domain ? null : d.domain
+                        )
+                      }
+                      className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                    >
+                      {showInstructions === d.domain ? "Hide Info" : "View Info"}
+                    </button>
                   )}
                   <button
                     onClick={() => handleDelete(d.domain)}
@@ -779,7 +778,7 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
                 </div>
               </div>
 
-              {showInstructions === d.domain && !d.verified && (
+              {!d.verified && (
                 <div className="p-4 bg-neutral-900/50 border-t border-neutral-700/50 space-y-4">
                   <div>
                     <h4 className="text-xs font-semibold text-neutral-300 mb-2">
@@ -853,6 +852,247 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
   );
 }
 
+function ZipUploadManager() {
+  const [file, setFile] = useState<File | null>(null);
+  const [scriptHead, setScriptHead] = useState("");
+  const [scriptBodyStart, setScriptBodyStart] = useState("");
+  const [scriptBodyEnd, setScriptBodyEnd] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{
+    fileName: string;
+    fileCount: number;
+    originalSize: number;
+    processedSize: number;
+  } | null>(null);
+  const [projects, setProjects] = useState<
+    { id: string; name: string; createdAt: string; files: Record<string, string> }[]
+  >([]);
+
+  const fetchProjects = useCallback(() => {
+    fetch("/api/upload")
+      .then((r) => r.json())
+      .then((d) => setProjects(d.projects || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const handleUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return;
+
+    setUploading(true);
+    setError("");
+    setResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("scriptHead", scriptHead);
+      formData.append("scriptBodyStart", scriptBodyStart);
+      formData.append("scriptBodyEnd", scriptBodyEnd);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Upload failed");
+        return;
+      }
+
+      const fileName = `${file.name.replace(".zip", "")}-processed.zip`;
+      const fileCount = parseInt(res.headers.get("X-File-Count") || "0");
+      const originalSize = parseInt(res.headers.get("X-Original-Size") || "0");
+      const processedSize = parseInt(res.headers.get("X-Processed-Size") || "0");
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setResult({ fileName, fileCount, originalSize, processedSize });
+      setFile(null);
+      fetchProjects();
+    } catch {
+      setError("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await fetch(`/api/upload?id=${id}`, { method: "DELETE" });
+      setProjects((prev) => prev.filter((p) => p.id !== id));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">ZIP File Upload & Script Injection</h2>
+        <p className="text-xs text-neutral-500 mb-5">
+          Upload a ZIP file containing your website. CDN scripts and tracking codes
+          will be auto-injected into all HTML files at 3 locations.
+        </p>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm space-y-1">
+            <p className="font-semibold">Processed successfully!</p>
+            <p className="text-xs">
+              {result.fileCount} files | {formatBytes(result.originalSize)} →{" "}
+              {formatBytes(result.processedSize)} | Downloaded as {result.fileName}
+            </p>
+          </div>
+        )}
+
+        <form onSubmit={handleUpload} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+              Upload ZIP File *
+            </label>
+            <input
+              type="file"
+              accept=".zip"
+              required
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm file:mr-3 file:py-1 file:px-3 file:bg-neutral-700 file:text-white file:border-0 file:rounded file:text-xs file:cursor-pointer focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 rounded font-medium">
+                  &lt;/head&gt;
+                </span>
+                <label className="text-sm font-medium text-neutral-300">
+                  Inject Before Closing Head Tag
+                </label>
+              </div>
+              <p className="text-xs text-neutral-500 mb-2">
+                CDN links, meta tags, CSS — injected right before &lt;/head&gt;
+              </p>
+              <textarea
+                placeholder={`<link rel="stylesheet" href="https://cdn.example.com/style.css">\n<meta name="analytics" content="UA-XXXXX">`}
+                value={scriptHead}
+                onChange={(e) => setScriptHead(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+              />
+            </div>
+
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2 py-0.5 text-xs bg-green-500/10 text-green-400 rounded font-medium">
+                  &lt;body&gt;
+                </span>
+                <label className="text-sm font-medium text-neutral-300">
+                  Inject After Opening Body Tag
+                </label>
+              </div>
+              <p className="text-xs text-neutral-500 mb-2">
+                Top banners, GTM noscript — injected right after &lt;body&gt;
+              </p>
+              <textarea
+                placeholder={`<!-- Google Tag Manager (noscript) -->\n<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-XXXX"></iframe></noscript>`}
+                value={scriptBodyStart}
+                onChange={(e) => setScriptBodyStart(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+              />
+            </div>
+
+            <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2 py-0.5 text-xs bg-purple-500/10 text-purple-400 rounded font-medium">
+                  &lt;/body&gt;
+                </span>
+                <label className="text-sm font-medium text-neutral-300">
+                  Inject Before Closing Body Tag
+                </label>
+              </div>
+              <p className="text-xs text-neutral-500 mb-2">
+                JS scripts, analytics, chat widgets — injected right before &lt;/body&gt;
+              </p>
+              <textarea
+                placeholder={`<script src="https://cdn.example.com/app.js"></script>\n<script>console.log("injected");</script>`}
+                value={scriptBodyEnd}
+                onChange={(e) => setScriptBodyEnd(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={uploading || !file}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+          >
+            {uploading ? "Processing..." : "Upload & Inject Scripts"}
+          </button>
+        </form>
+      </div>
+
+      {projects.length > 0 && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-3">
+            Recent Uploads ({projects.length})
+          </h3>
+          <div className="space-y-2">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-3 p-3 bg-neutral-800/30 border border-neutral-700/50 rounded-lg"
+              >
+                <div>
+                  <p className="text-sm text-neutral-300 font-medium">
+                    {p.name}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    {Object.keys(p.files).length} files |{" "}
+                    {new Date(p.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDelete(p.id)}
+                  className="text-xs text-red-400 hover:bg-red-500/10 px-2.5 py-1.5 rounded transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function CloakPage() {
   const [links, setLinks] = useState<CloakedLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -863,7 +1103,7 @@ export default function CloakPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   const [editSlug, setEditSlug] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"links" | "domains">("links");
+  const [activeTab, setActiveTab] = useState<"links" | "domains" | "uploads">("links");
 
   const defaultFilter: TrafficFilter = {
     botMode: "block",
@@ -1044,7 +1284,7 @@ export default function CloakPage() {
         </header>
 
         <div className="flex gap-2 mb-8 border-b border-neutral-800">
-          {(["links", "domains"] as const).map((t) => (
+          {(["links", "domains", "uploads"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
@@ -1054,12 +1294,14 @@ export default function CloakPage() {
                   : "text-neutral-500 hover:text-neutral-300"
               }`}
             >
-              {t === "links" ? "Cloaked Links" : "Custom Domains"}
+              {t === "links" ? "Cloaked Links" : t === "domains" ? "Custom Domains" : "ZIP Upload"}
             </button>
           ))}
         </div>
 
         {activeTab === "domains" && <DomainManager links={links} />}
+
+        {activeTab === "uploads" && <ZipUploadManager />}
 
         {activeTab === "links" && (
           <>

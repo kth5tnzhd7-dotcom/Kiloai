@@ -89,3 +89,4 @@ The application is a comprehensive link cloaking platform with custom domain man
 | Today | Added analytics tracking, device detection, link management |
 | Today | Added bot detection, custom domains, Nicegram ads, traffic filtering |
 | Today | Fixed domain verification: code stored server-side, proper DNS setup instructions, step-by-step guide for Cloudflare/GoDaddy/Namecheap, copy-to-clipboard for TXT record |
+| Today | Domain: linkedSlug optional, DNS instructions always visible for pending. ZIP upload: auto-inject scripts at </head>, <body>, </body>. Dashboard: 3 tabs (Links, Domains, Uploads). |

@@ -4,6 +4,7 @@ import {
   getAllDomains,
   getDomain,
   deleteDomain,
+  updateDomain,
 } from "@/lib/store";
 
 export async function GET() {
@@ -30,15 +31,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!linkedSlug) {
-      return NextResponse.json(
-        { error: "Linked slug is required" },
-        { status: 400 }
-      );
-    }
-
     try {
-      const cd = addDomain(domain, linkedSlug);
+      const cd = addDomain(domain, linkedSlug || "");
       return NextResponse.json({ domain: cd }, { status: 201 });
     } catch (error) {
       const message =
@@ -109,6 +103,19 @@ export async function PATCH(request: NextRequest) {
         message: "Verification code does not match. Please add the correct TXT record.",
         expectedCode: cd.verificationCode,
       });
+    }
+
+    if (action === "assign") {
+      const body = await request.json().catch(() => ({}));
+      const slug = body.linkedSlug || "";
+      const updated = updateDomain(domain, { linkedSlug: slug });
+      if (!updated) {
+        return NextResponse.json(
+          { error: "Domain not found" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ domain: updated });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
