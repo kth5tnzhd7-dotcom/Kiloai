@@ -1423,6 +1423,387 @@ function WebsiteCloner() {
   );
 }
 
+function DeployManager() {
+  const [deployments, setDeployments] = useState<
+    {
+      id: string;
+      name: string;
+      fileCount: number;
+      deployUrl: string;
+      status: string;
+      linkedSlug: string;
+      createdAt: string;
+      cpanelUrl: string;
+    }[]
+  >([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [deploying, setDeploying] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const [cpanelUrl, setCpanelUrl] = useState("");
+  const [cpanelUser, setCpanelUser] = useState("");
+  const [cpanelToken, setCpanelToken] = useState("");
+  const [cpanelDir, setCpanelDir] = useState("public_html");
+  const [manualUrl, setManualUrl] = useState("");
+  const [mode, setMode] = useState<"cpanel" | "manual">("cpanel");
+
+  const fetchDeployments = useCallback(() => {
+    fetch("/api/deploy")
+      .then((r) => r.json())
+      .then((d) => setDeployments(d.deployments || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchDeployments();
+  }, [fetchDeployments]);
+
+  const handleDeploy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeploying(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      if (mode === "manual") {
+        if (!manualUrl) {
+          setError("Please enter a URL");
+          setDeploying(false);
+          return;
+        }
+        const res = await fetch("/api/deploy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "manual-deploy",
+            deployUrl: manualUrl,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed");
+          return;
+        }
+        setSuccess(`URL saved! Temp URL: ${data.deployment.deployUrl || manualUrl}`);
+        setManualUrl("");
+        fetchDeployments();
+        return;
+      }
+
+      if (!file || !cpanelUrl || !cpanelUser || !cpanelToken) {
+        setError("All cPanel fields and ZIP file are required");
+        setDeploying(false);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("cpanelUrl", cpanelUrl);
+      formData.append("cpanelUsername", cpanelUser);
+      formData.append("cpanelToken", cpanelToken);
+      formData.append("cpanelDir", cpanelDir);
+      formData.append("name", file.name.replace(".zip", ""));
+
+      const res = await fetch("/api/deploy", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Deployment failed");
+        return;
+      }
+
+      setSuccess(
+        `Deployed! Temp URL: ${data.deployment.deployUrl}`
+      );
+      setFile(null);
+      fetchDeployments();
+    } catch {
+      setError("Deployment failed");
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await fetch(`/api/deploy?id=${id}`, { method: "DELETE" });
+      setDeployments((prev) => prev.filter((d) => d.id !== id));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleLinkToCloak = (deployUrl: string) => {
+    navigator.clipboard.writeText(deployUrl);
+    setSuccess("Temp URL copied! Paste it as destination URL in Cloaked Links tab.");
+    setTimeout(() => setSuccess(""), 4000);
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">Deploy & Temp URLs</h2>
+        <p className="text-xs text-neutral-500 mb-5">
+          Deploy ZIP files to your cPanel hosting and get temp URLs for cloaking.
+          Or add a manual URL to use as your cloaked destination.
+        </p>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-5">
+          <button
+            onClick={() => setMode("cpanel")}
+            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+              mode === "cpanel"
+                ? "bg-blue-600 text-white"
+                : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            cPanel Deploy
+          </button>
+          <button
+            onClick={() => setMode("manual")}
+            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+              mode === "manual"
+                ? "bg-blue-600 text-white"
+                : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            Add Manual URL
+          </button>
+        </div>
+
+        <form onSubmit={handleDeploy} className="space-y-4">
+          {mode === "cpanel" ? (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                  ZIP File *
+                </label>
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm file:mr-3 file:py-1 file:px-3 file:bg-neutral-700 file:text-white file:border-0 file:rounded file:text-xs file:cursor-pointer focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    cPanel URL *
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://yourserver.com:2083"
+                    value={cpanelUrl}
+                    onChange={(e) => setCpanelUrl(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    Username *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="cpanel_username"
+                    value={cpanelUser}
+                    onChange={(e) => setCpanelUser(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    API Token *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="cPanel API token"
+                    value={cpanelToken}
+                    onChange={(e) => setCpanelToken(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    Deploy Directory
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="public_html"
+                    value={cpanelDir}
+                    onChange={(e) => setCpanelDir(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
+                <p className="text-xs text-neutral-500 mb-1">
+                  How to get cPanel API Token:
+                </p>
+                <ol className="text-xs text-neutral-400 space-y-1 list-decimal list-inside">
+                  <li>Login to your cPanel</li>
+                  <li>Go to Manage API Tokens (under Security)</li>
+                  <li>Create a new token and copy it</li>
+                  <li>Enter your cPanel URL, username, and token above</li>
+                </ol>
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                Deployed URL *
+              </label>
+              <input
+                type="url"
+                required
+                placeholder="https://your-hosted-site.com"
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-xs text-neutral-500 mt-1">
+                Paste a URL where your white page is already hosted
+              </p>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={deploying}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+          >
+            {deploying
+              ? "Deploying..."
+              : mode === "cpanel"
+                ? "Deploy to cPanel"
+                : "Save URL"}
+          </button>
+        </form>
+      </div>
+
+      {deployments.length > 0 && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-3">
+            Deployments ({deployments.length})
+          </h3>
+          <div className="space-y-2">
+            {deployments.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between gap-3 p-3 bg-neutral-800/30 border border-neutral-700/50 rounded-lg"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-sm text-neutral-300 font-medium">
+                      {d.name}
+                    </p>
+                    <span
+                      className={`px-2 py-0.5 text-xs rounded ${
+                        d.status === "deployed"
+                          ? "bg-green-500/10 text-green-400"
+                          : d.status === "failed"
+                            ? "bg-red-500/10 text-red-400"
+                            : "bg-amber-500/10 text-amber-400"
+                      }`}
+                    >
+                      {d.status}
+                    </span>
+                  </div>
+                  {d.deployUrl && (
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs text-blue-400 font-mono truncate max-w-[350px]">
+                        {d.deployUrl}
+                      </code>
+                      <button
+                        onClick={() => handleLinkToCloak(d.deployUrl)}
+                        className="px-2 py-0.5 text-xs bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded transition-colors shrink-0"
+                      >
+                        Copy for Cloak
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-neutral-600 mt-0.5">
+                    {d.fileCount} files |{" "}
+                    {new Date(d.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDelete(d.id)}
+                  className="text-xs text-red-400 hover:bg-red-500/10 px-2.5 py-1.5 rounded transition-colors shrink-0"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h3 className="text-sm font-semibold mb-3">Workflow</h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[
+            {
+              step: "1",
+              title: "Clone Website",
+              desc: "Use Site Cloner tab to download any site as ZIP",
+            },
+            {
+              step: "2",
+              title: "Deploy to cPanel",
+              desc: "Upload ZIP with cPanel credentials to get temp URL",
+            },
+            {
+              step: "3",
+              title: "Copy Temp URL",
+              desc: 'Click "Copy for Cloak" to copy the deployed URL',
+            },
+            {
+              step: "4",
+              title: "Create Cloaked Link",
+              desc: "Paste temp URL as destination in Cloaked Links tab",
+            },
+          ].map((s) => (
+            <div key={s.step} className="flex gap-3">
+              <div className="shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-bold">
+                {s.step}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-200">
+                  {s.title}
+                </p>
+                <p className="text-xs text-neutral-500">{s.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function CloakPage() {
   const [links, setLinks] = useState<CloakedLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1433,7 +1814,7 @@ export default function CloakPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   const [editSlug, setEditSlug] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"links" | "domains" | "uploads" | "cloner">("links");
+  const [activeTab, setActiveTab] = useState<"links" | "domains" | "uploads" | "cloner" | "deploy">("links");
 
   const defaultFilter: TrafficFilter = {
     botMode: "block",
@@ -1613,12 +1994,12 @@ export default function CloakPage() {
           </p>
         </header>
 
-        <div className="flex gap-2 mb-8 border-b border-neutral-800">
-          {(["links", "domains", "uploads", "cloner"] as const).map((t) => (
+        <div className="flex gap-2 mb-8 border-b border-neutral-800 overflow-x-auto">
+          {(["links", "domains", "uploads", "cloner", "deploy"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
+              className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors whitespace-nowrap ${
                 activeTab === t
                   ? "text-blue-400 border-b-2 border-blue-400"
                   : "text-neutral-500 hover:text-neutral-300"
@@ -1630,7 +2011,9 @@ export default function CloakPage() {
                   ? "Custom Domains"
                   : t === "uploads"
                     ? "ZIP Upload"
-                    : "Site Cloner"}
+                    : t === "cloner"
+                      ? "Site Cloner"
+                      : "Deploy"}
             </button>
           ))}
         </div>
@@ -1640,6 +2023,8 @@ export default function CloakPage() {
         {activeTab === "uploads" && <ZipUploadManager />}
 
         {activeTab === "cloner" && <WebsiteCloner />}
+
+        {activeTab === "deploy" && <DeployManager />}
 
         {activeTab === "links" && (
           <>
