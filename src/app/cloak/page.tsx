@@ -1916,9 +1916,9 @@ function ChainManager() {
       <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-1">Multi-Domain Redirect Chain</h2>
         <p className="text-xs text-neutral-500 mb-5">
-          Create a redirect chain through 4 domains. Bots get blocked at each step.
-          Only real users who tap your Nicegram ad reach the final destination.
-          Each step shows a different &quot;verification&quot; page.
+          Create a silent redirect chain through 4 hops. Bots get blocked instantly.
+          Real users are invisibly redirected to the destination — no pages shown.
+          Perfect for Nicegram ads: bot sees 404, real user lands on your offer.
         </p>
 
         {error && (
