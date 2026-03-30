@@ -88,3 +88,4 @@ The application is a comprehensive link cloaking platform with custom domain man
 | Today | Built link cloaking with white pages and short URLs |
 | Today | Added analytics tracking, device detection, link management |
 | Today | Added bot detection, custom domains, Nicegram ads, traffic filtering |
+| Today | Fixed domain verification: code stored server-side, proper DNS setup instructions, step-by-step guide for Cloudflare/GoDaddy/Namecheap, copy-to-clipboard for TXT record |

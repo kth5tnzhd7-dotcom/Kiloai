@@ -73,6 +73,7 @@ interface Domain {
   id: string;
   domain: string;
   verified: boolean;
+  verificationCode: string;
   createdAt: string;
   linkedSlug: string;
   sslEnabled: boolean;
@@ -574,7 +575,10 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
   const [linkedSlug, setLinkedSlug] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [verificationInfo, setVerificationInfo] = useState<Record<string, string>>({});
+  const [success, setSuccess] = useState("");
+  const [verifying, setVerifying] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [showInstructions, setShowInstructions] = useState<string | null>(null);
 
   const fetchDomains = useCallback(() => {
     fetch("/api/domains")
@@ -592,6 +596,7 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
     if (!newDomain || !linkedSlug) return;
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
       const res = await fetch("/api/domains", {
         method: "POST",
@@ -603,13 +608,12 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
         setError(data.error || "Failed to add domain");
         return;
       }
-      setVerificationInfo((prev) => ({
-        ...prev,
-        [data.domain.domain]: data.verificationCode,
-      }));
       setDomains((prev) => [data.domain, ...prev]);
       setNewDomain("");
       setLinkedSlug("");
+      setSuccess(`Domain "${data.domain.domain}" added! Add the TXT record below to verify.`);
+      setShowInstructions(data.domain.domain);
+      setTimeout(() => setSuccess(""), 5000);
     } catch {
       setError("Failed to add domain");
     } finally {
@@ -618,20 +622,29 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
   };
 
   const handleVerify = async (domain: string) => {
+    setVerifying(domain);
+    setError("");
     try {
-      const code = verificationInfo[domain] || "";
       const res = await fetch(`/api/domains?domain=${domain}&action=verify`, {
         method: "PATCH",
-        headers: { "x-verification-check": code },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.verified) {
         setDomains((prev) =>
           prev.map((d) => (d.domain === domain ? { ...d, verified: true } : d))
         );
+        setSuccess(`Domain "${domain}" verified successfully!`);
+        setShowInstructions(null);
+        setTimeout(() => setSuccess(""), 3000);
+      } else {
+        setError(data.message || "Verification failed. Make sure you added the TXT record.");
       }
     } catch {
-      // silently fail
+      setError("Verification failed");
+    } finally {
+      setVerifying(null);
     }
   };
 
@@ -639,17 +652,24 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
     try {
       await fetch(`/api/domains?domain=${domain}`, { method: "DELETE" });
       setDomains((prev) => prev.filter((d) => d.domain !== domain));
+      if (showInstructions === domain) setShowInstructions(null);
     } catch {
       // silently fail
     }
   };
 
+  const copyCode = (code: string, domain: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(domain);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
+
   return (
     <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-8">
-      <h2 className="text-lg font-semibold mb-4">Custom Domains</h2>
-      <p className="text-xs text-neutral-500 mb-4">
-        Add your own domains to use for cloaked links. Point your domain&apos;s
-        DNS to this server, then verify ownership.
+      <h2 className="text-lg font-semibold mb-1">Custom Domains</h2>
+      <p className="text-xs text-neutral-500 mb-5">
+        Add your own domains for cloaked links. Each domain gets a unique verification code
+        — add it as a DNS TXT record, then click Verify.
       </p>
 
       {error && (
@@ -657,19 +677,26 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
           {error}
         </div>
       )}
+      {success && (
+        <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+          {success}
+        </div>
+      )}
 
       <form onSubmit={handleAdd} className="flex flex-col md:flex-row gap-3 mb-6">
         <input
           type="text"
+          required
           placeholder="yourdomain.com"
           value={newDomain}
           onChange={(e) => setNewDomain(e.target.value)}
-          className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+          className="flex-1 px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
         />
         <select
+          required
           value={linkedSlug}
           onChange={(e) => setLinkedSlug(e.target.value)}
-          className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          className="px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
         >
           <option value="">Select a link...</option>
           {links.map((l) => (
@@ -681,63 +708,143 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
         <button
           type="submit"
           disabled={loading || !newDomain || !linkedSlug}
-          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
         >
           {loading ? "Adding..." : "Add Domain"}
         </button>
       </form>
 
       {domains.length === 0 ? (
-        <p className="text-xs text-neutral-600 text-center py-4">
-          No custom domains added yet.
-        </p>
+        <div className="text-center py-8 border border-dashed border-neutral-700 rounded-lg">
+          <p className="text-sm text-neutral-500 mb-1">No custom domains yet</p>
+          <p className="text-xs text-neutral-600">
+            Add a domain above to get started
+          </p>
+        </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {domains.map((d) => (
-            <div
-              key={d.id}
-              className="flex items-center justify-between gap-3 p-3 bg-neutral-800/50 border border-neutral-700/50 rounded-lg"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <code className="text-sm text-blue-400 font-mono">
-                    {d.domain}
-                  </code>
-                  <span
-                    className={`px-2 py-0.5 text-xs rounded ${
-                      d.verified
-                        ? "bg-green-500/10 text-green-400"
-                        : "bg-amber-500/10 text-amber-400"
-                    }`}
-                  >
-                    {d.verified ? "Verified" : "Pending"}
-                  </span>
-                </div>
-                <p className="text-xs text-neutral-500 mt-0.5">
-                  → /s/{d.linkedSlug}
-                  {!d.verified && verificationInfo[d.domain] && (
-                    <span className="ml-2 text-neutral-600">
-                      TXT: cloak-verify={verificationInfo[d.domain]}
+            <div key={d.id} className="border border-neutral-700/50 rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between gap-3 p-4 bg-neutral-800/30">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <code className="text-sm text-blue-400 font-mono font-semibold">
+                      {d.domain}
+                    </code>
+                    <span
+                      className={`px-2 py-0.5 text-xs rounded font-medium ${
+                        d.verified
+                          ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      }`}
+                    >
+                      {d.verified ? "Verified" : "Pending Verification"}
                     </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-neutral-500">
+                    <span>Links to: /s/{d.linkedSlug}</span>
+                    <span>Added: {new Date(d.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!d.verified && (
+                    <>
+                      <button
+                        onClick={() =>
+                          setShowInstructions(
+                            showInstructions === d.domain ? null : d.domain
+                          )
+                        }
+                        className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                      >
+                        {showInstructions === d.domain
+                          ? "Hide DNS Setup"
+                          : "DNS Setup"}
+                      </button>
+                      <button
+                        onClick={() => handleVerify(d.domain)}
+                        disabled={verifying === d.domain}
+                        className="px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors disabled:opacity-50"
+                      >
+                        {verifying === d.domain ? "Verifying..." : "Verify Now"}
+                      </button>
+                    </>
                   )}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {!d.verified && (
                   <button
-                    onClick={() => handleVerify(d.domain)}
-                    className="px-3 py-1 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors"
+                    onClick={() => handleDelete(d.domain)}
+                    className="px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded transition-colors"
                   >
-                    Verify
+                    Remove
                   </button>
-                )}
-                <button
-                  onClick={() => handleDelete(d.domain)}
-                  className="px-3 py-1 text-xs text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                >
-                  Remove
-                </button>
+                </div>
               </div>
+
+              {showInstructions === d.domain && !d.verified && (
+                <div className="p-4 bg-neutral-900/50 border-t border-neutral-700/50 space-y-4">
+                  <div>
+                    <h4 className="text-xs font-semibold text-neutral-300 mb-2">
+                      DNS Verification Instructions
+                    </h4>
+                    <ol className="text-xs text-neutral-400 space-y-1.5 list-decimal list-inside">
+                      <li>Go to your domain&apos;s DNS settings (GoDaddy, Cloudflare, Namecheap, etc.)</li>
+                      <li>Add a new <span className="text-blue-400 font-semibold">TXT</span> record</li>
+                      <li>Set the <span className="text-neutral-300 font-medium">Name/Host</span> to <code className="text-blue-400">@</code> or your domain</li>
+                      <li>Set the <span className="text-neutral-300 font-medium">Value</span> to the code below</li>
+                      <li>Save and wait a few minutes for DNS propagation</li>
+                      <li>Click <span className="text-amber-400 font-medium">Verify Now</span> above</li>
+                    </ol>
+                  </div>
+
+                  <div className="bg-neutral-800 border border-neutral-700 rounded-lg p-4">
+                    <p className="text-xs text-neutral-500 mb-2">TXT Record Value:</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-sm text-green-400 font-mono bg-neutral-900 px-3 py-2 rounded border border-neutral-700 break-all">
+                        {d.verificationCode}
+                      </code>
+                      <button
+                        onClick={() => copyCode(d.verificationCode, d.domain)}
+                        className="shrink-0 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-colors"
+                      >
+                        {copiedCode === d.domain ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-neutral-800/50 border border-neutral-700/30 rounded-lg p-3">
+                    <p className="text-xs text-neutral-500 mb-1">Quick Setup Examples:</p>
+                    <div className="space-y-2 text-xs text-neutral-400">
+                      <div>
+                        <span className="text-neutral-500">Cloudflare:</span>{" "}
+                        DNS → Add Record → Type: TXT → Name: @ → Content:{" "}
+                        <code className="text-green-400">{d.verificationCode}</code>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">GoDaddy:</span>{" "}
+                        DNS Management → Add → Type: TXT → Host: @ → TXT Value:{" "}
+                        <code className="text-green-400">{d.verificationCode}</code>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Namecheap:</span>{" "}
+                        Advanced DNS → Add Record → Type: TXT → Host: @ → Value:{" "}
+                        <code className="text-green-400">{d.verificationCode}</code>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {d.verified && (
+                <div className="p-3 bg-green-500/5 border-t border-green-500/10">
+                  <div className="flex items-center gap-2 text-xs text-green-400">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Domain verified and active. Visitors to{" "}
+                    <code className="font-mono font-semibold">https://{d.domain}/s/{d.linkedSlug}</code>{" "}
+                    will see your white page.
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

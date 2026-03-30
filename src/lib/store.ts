@@ -44,6 +44,7 @@ export interface CustomDomain {
   id: string;
   domain: string;
   verified: boolean;
+  verificationCode: string;
   createdAt: string;
   linkedSlug: string;
   sslEnabled: boolean;
@@ -92,10 +93,6 @@ function generateSlug(): string {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
-}
-
-function generateVerificationCode(): string {
-  return "cloak-verify-" + crypto.randomUUID().slice(0, 8);
 }
 
 const defaultTrafficFilter: TrafficFilter = {
@@ -367,6 +364,10 @@ export function updateLink(
   return link;
 }
 
+function generateVerificationCode(domain: string): string {
+  return `cloak-verify-${domain.replace(/[^a-z0-9]/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 export function addDomain(domain: string, linkedSlug: string): CustomDomain {
   const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
 
@@ -374,10 +375,13 @@ export function addDomain(domain: string, linkedSlug: string): CustomDomain {
     throw new Error(`Domain "${normalized}" is already registered`);
   }
 
+  const code = generateVerificationCode(normalized);
+
   const cd: CustomDomain = {
     id: crypto.randomUUID(),
     domain: normalized,
     verified: false,
+    verificationCode: code,
     createdAt: new Date().toISOString(),
     linkedSlug,
     sslEnabled: true,
@@ -413,7 +417,9 @@ export function deleteDomain(domain: string): boolean {
 }
 
 export function getVerificationCode(domain: string): string {
-  return `cloak-verify-${domain.replace(/[^a-z0-9]/g, "")}`;
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const cd = domains.get(normalized);
+  return cd?.verificationCode || "";
 }
 
 export function getLinkByDomain(host: string): CloakedLink | undefined {

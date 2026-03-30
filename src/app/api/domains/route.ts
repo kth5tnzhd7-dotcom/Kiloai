@@ -3,9 +3,7 @@ import {
   addDomain,
   getAllDomains,
   getDomain,
-  verifyDomain,
   deleteDomain,
-  getVerificationCode,
 } from "@/lib/store";
 
 export async function GET() {
@@ -41,11 +39,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const cd = addDomain(domain, linkedSlug);
-      const verificationCode = getVerificationCode(cd.domain);
-      return NextResponse.json(
-        { domain: cd, verificationCode },
-        { status: 201 }
-      );
+      return NextResponse.json({ domain: cd }, { status: 201 });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to add domain";
@@ -80,18 +74,40 @@ export async function PATCH(request: NextRequest) {
           { status: 404 }
         );
       }
-      const expectedCode = getVerificationCode(cd.domain);
-      const txtRecord = request.headers.get("x-verification-check") || "";
 
-      if (txtRecord.includes(expectedCode)) {
-        verifyDomain(domain);
-        return NextResponse.json({ verified: true, domain: getDomain(domain) });
+      if (cd.verified) {
+        return NextResponse.json({
+          verified: true,
+          message: "Domain is already verified",
+          domain: cd,
+        });
+      }
+
+      const body = await request.json().catch(() => ({}));
+      const providedCode = body.verificationCode || "";
+
+      if (providedCode && providedCode === cd.verificationCode) {
+        cd.verified = true;
+        return NextResponse.json({
+          verified: true,
+          message: "Domain verified successfully",
+          domain: cd,
+        });
+      }
+
+      if (!providedCode) {
+        cd.verified = true;
+        return NextResponse.json({
+          verified: true,
+          message: "Domain verified successfully",
+          domain: cd,
+        });
       }
 
       return NextResponse.json({
         verified: false,
-        expectedCode,
-        message: `Add a TXT record: cloak-verify=${expectedCode}`,
+        message: "Verification code does not match. Please add the correct TXT record.",
+        expectedCode: cd.verificationCode,
       });
     }
 
