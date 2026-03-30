@@ -16,54 +16,106 @@ interface LinkData {
   redirectDelay: number;
   cloakType: string;
   isActive: boolean;
+  trafficFilter: {
+    botMode: string;
+    botRedirectUrl: string;
+    requireJavaScript: boolean;
+  };
 }
+
+type PageState = "loading" | "redirecting" | "blocked" | "not-found" | "inactive";
 
 export default function CloakedPage({ params }: PageProps) {
   const [link, setLink] = useState<LinkData | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [inactive, setInactive] = useState(false);
+  const [state, setState] = useState<PageState>("loading");
+  const [blockReason, setBlockReason] = useState("");
   const [countdown, setCountdown] = useState(3);
+  const [botDetected, setBotDetected] = useState(false);
 
   useEffect(() => {
     params.then(({ slug }) => {
       fetch(`/api/links?slug=${slug}`)
         .then((res) => {
-          if (!res.ok) throw new Error();
+          if (!res.ok) {
+            setState("not-found");
+            throw new Error();
+          }
           return res.json();
         })
         .then((data) => {
-          if (data.link) {
-            if (!data.link.isActive) {
-              setInactive(true);
-              return;
-            }
-            setLink(data.link);
-            setCountdown(data.link.redirectDelay ?? 3);
-
-            const analytics = collectAnalytics();
-            fetch("/api/track", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ slug, ...analytics }),
-              keepalive: true,
-            }).catch(() => {});
-          } else {
-            setNotFound(true);
+          if (!data.link) {
+            setState("not-found");
+            return;
           }
+          if (!data.link.isActive) {
+            setState("inactive");
+            return;
+          }
+
+          setLink(data.link);
+          setCountdown(data.link.redirectDelay ?? 3);
+
+          const analytics = collectAnalytics();
+
+          const ua = navigator.userAgent;
+          const headers: Record<string, string> = {
+            "user-agent": ua,
+            "accept-language": navigator.language,
+          };
+
+          const checkResult = {
+            device: analytics.device,
+            browser: analytics.browser,
+            browserVersion: analytics.browserVersion,
+            os: analytics.os,
+            osVersion: analytics.osVersion,
+            referrer: analytics.referrer || document.referrer,
+            language: analytics.language,
+            screenWidth: analytics.screenWidth,
+            screenHeight: analytics.screenHeight,
+            timezone: analytics.timezone,
+          };
+
+          fetch("/api/track", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slug, ...checkResult }),
+            keepalive: true,
+          })
+            .then((res) => res.json())
+            .then((trackData) => {
+              if (trackData.blocked) {
+                setBotDetected(true);
+                setBlockReason(trackData.reason || "Traffic blocked");
+                setState("blocked");
+                return;
+              }
+
+              if (trackData.redirect) {
+                window.location.href = trackData.redirect;
+                return;
+              }
+
+              setState("redirecting");
+            })
+            .catch(() => {
+              setState("redirecting");
+            });
         })
-        .catch(() => setNotFound(true));
+        .catch(() => {
+          if (state === "loading") setState("not-found");
+        });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!link) return;
+    if (state !== "redirecting" || !link) return;
 
     if (countdown <= 0) {
-      if (link.cloakType === "iframe") {
-        return;
+      if (link.cloakType !== "iframe") {
+        window.location.href = link.destinationUrl;
       }
-      window.location.href = link.destinationUrl;
       return;
     }
 
@@ -72,10 +124,10 @@ export default function CloakedPage({ params }: PageProps) {
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [link, countdown]);
+  }, [state, link, countdown]);
 
   useEffect(() => {
-    if (link) {
+    if (link && state === "redirecting") {
       document.title = link.whitePageTitle;
       const metaDesc = document.querySelector('meta[name="description"]');
       if (metaDesc) {
@@ -87,27 +139,38 @@ export default function CloakedPage({ params }: PageProps) {
         document.head.appendChild(meta);
       }
     }
-  }, [link]);
+  }, [link, state]);
 
-  if (notFound) {
+  if (state === "loading") {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
+          <div className="w-8 h-8 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400 text-sm">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === "not-found") {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center px-4">
           <h1 className="text-2xl font-bold text-gray-800 mb-2">
-            Page Not Found
+            404 — Page Not Found
           </h1>
           <p className="text-gray-500">
-            This link does not exist or has expired.
+            The page you are looking for does not exist or has expired.
           </p>
         </div>
       </div>
     );
   }
 
-  if (inactive) {
+  if (state === "inactive") {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center px-4">
           <h1 className="text-2xl font-bold text-gray-800 mb-2">
             Link Unavailable
           </h1>
@@ -119,13 +182,42 @@ export default function CloakedPage({ params }: PageProps) {
     );
   }
 
-  if (!link) {
+  if (state === "blocked") {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <p className="text-gray-400">Loading...</p>
+        <div className="text-center px-4">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg
+              className="w-8 h-8 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">
+            Access Denied
+          </h1>
+          <p className="text-gray-500 mb-1">
+            Your request has been blocked by our security system.
+          </p>
+          {botDetected && (
+            <p className="text-xs text-gray-400 mt-2">
+              Bot detection: {blockReason}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
+
+  if (!link) return null;
 
   if (link.cloakType === "iframe") {
     return (
@@ -158,9 +250,8 @@ export default function CloakedPage({ params }: PageProps) {
     );
   }
 
-  const progress = link.redirectDelay
-    ? ((link.redirectDelay - countdown) / link.redirectDelay) * 100
-    : ((3 - countdown) / 3) * 100;
+  const delay = link.redirectDelay ?? 3;
+  const progress = ((delay - countdown) / delay) * 100;
 
   return (
     <div className="min-h-screen bg-white">

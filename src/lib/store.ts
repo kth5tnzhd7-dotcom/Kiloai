@@ -1,3 +1,5 @@
+import type { TrafficVerdict } from "./bot-detect";
+
 export interface ClickEvent {
   id: string;
   timestamp: string;
@@ -13,10 +15,16 @@ export interface ClickEvent {
   timezone: string;
   ip: string;
   country: string;
+  isBot: boolean;
+  botType: string;
+  verdict: TrafficVerdict;
 }
 
 export interface LinkAnalytics {
   totalClicks: number;
+  realClicks: number;
+  botClicks: number;
+  blockedClicks: number;
   devices: Record<string, number>;
   browsers: Record<string, number>;
   operatingSystems: Record<string, number>;
@@ -27,7 +35,31 @@ export interface LinkAnalytics {
   timezones: Record<string, number>;
   clicksByHour: Record<string, number>;
   clicksByDay: Record<string, number>;
+  botTypes: Record<string, number>;
+  verdicts: Record<string, number>;
   recentClicks: ClickEvent[];
+}
+
+export interface CustomDomain {
+  id: string;
+  domain: string;
+  verified: boolean;
+  createdAt: string;
+  linkedSlug: string;
+  sslEnabled: boolean;
+}
+
+export interface TrafficFilter {
+  botMode: "block" | "redirect" | "allow";
+  botRedirectUrl: string;
+  allowedReferrers: string[];
+  blockedReferrers: string[];
+  allowedCountries: string[];
+  blockedCountries: string[];
+  allowedUserAgents: string[];
+  blockedUserAgents: string[];
+  requireJavaScript: boolean;
+  captchaEnabled: boolean;
 }
 
 export interface CloakedLink {
@@ -46,9 +78,12 @@ export interface CloakedLink {
   maxClicks: number;
   redirectDelay: number;
   cloakType: "redirect" | "iframe" | "meta-refresh";
+  trafficFilter: TrafficFilter;
+  nicegramAdUrl: string;
 }
 
 const links = new Map<string, CloakedLink>();
+const domains = new Map<string, CustomDomain>();
 
 function generateSlug(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -58,6 +93,23 @@ function generateSlug(): string {
   }
   return result;
 }
+
+function generateVerificationCode(): string {
+  return "cloak-verify-" + crypto.randomUUID().slice(0, 8);
+}
+
+const defaultTrafficFilter: TrafficFilter = {
+  botMode: "block",
+  botRedirectUrl: "",
+  allowedReferrers: [],
+  blockedReferrers: [],
+  allowedCountries: [],
+  blockedCountries: [],
+  allowedUserAgents: [],
+  blockedUserAgents: [],
+  requireJavaScript: true,
+  captchaEnabled: false,
+};
 
 export function createLink(data: {
   destinationUrl: string;
@@ -70,6 +122,7 @@ export function createLink(data: {
   maxClicks?: number;
   redirectDelay?: number;
   cloakType?: "redirect" | "iframe" | "meta-refresh";
+  trafficFilter?: Partial<TrafficFilter>;
 }): CloakedLink {
   const slug = data.slug || generateSlug();
 
@@ -93,7 +146,11 @@ export function createLink(data: {
     maxClicks: data.maxClicks || 0,
     redirectDelay: data.redirectDelay ?? 3,
     cloakType: data.cloakType || "redirect",
+    trafficFilter: { ...defaultTrafficFilter, ...data.trafficFilter },
+    nicegramAdUrl: "",
   };
+
+  link.nicegramAdUrl = `https://t.me/nicegram_bot?start=ad_${slug}`;
 
   links.set(slug, link);
   return link;
@@ -128,6 +185,9 @@ export function trackClick(
     timezone: string;
     ip: string;
     country: string;
+    isBot: boolean;
+    botType: string;
+    verdict: TrafficVerdict;
   }
 ): void {
   const link = links.get(slug);
@@ -150,6 +210,9 @@ export function trackClick(
     timezone: eventData.timezone || "Unknown",
     ip: eventData.ip || "Unknown",
     country: eventData.country || "Unknown",
+    isBot: eventData.isBot,
+    botType: eventData.botType || "Unknown",
+    verdict: eventData.verdict,
   };
 
   link.clickEvents.push(event);
@@ -173,6 +236,11 @@ export function getAnalytics(slug: string): LinkAnalytics | null {
   const timezones: Record<string, number> = {};
   const clicksByHour: Record<string, number> = {};
   const clicksByDay: Record<string, number> = {};
+  const botTypes: Record<string, number> = {};
+  const verdicts: Record<string, number> = {};
+  let realClicks = 0;
+  let botClicks = 0;
+  let blockedClicks = 0;
 
   for (const event of link.clickEvents) {
     devices[event.device] = (devices[event.device] || 0) + 1;
@@ -194,10 +262,23 @@ export function getAnalytics(slug: string): LinkAnalytics | null {
     const day = date.toISOString().split("T")[0];
     clicksByHour[hour] = (clicksByHour[hour] || 0) + 1;
     clicksByDay[day] = (clicksByDay[day] || 0) + 1;
+
+    if (event.isBot) {
+      botClicks++;
+      botTypes[event.botType] = (botTypes[event.botType] || 0) + 1;
+    } else {
+      realClicks++;
+    }
+
+    verdicts[event.verdict] = (verdicts[event.verdict] || 0) + 1;
+    if (event.verdict === "block") blockedClicks++;
   }
 
   return {
     totalClicks: link.clicks,
+    realClicks,
+    botClicks,
+    blockedClicks,
     devices,
     browsers,
     operatingSystems,
@@ -208,6 +289,8 @@ export function getAnalytics(slug: string): LinkAnalytics | null {
     timezones,
     clicksByHour,
     clicksByDay,
+    botTypes,
+    verdicts,
     recentClicks: [...link.clickEvents].reverse().slice(0, 50),
   };
 }
@@ -230,6 +313,11 @@ export function getAllLinks(): CloakedLink[] {
 }
 
 export function deleteLink(slug: string): boolean {
+  for (const [, domain] of domains) {
+    if (domain.linkedSlug === slug) {
+      domain.linkedSlug = "";
+    }
+  }
   return links.delete(slug);
 }
 
@@ -253,6 +341,7 @@ export function updateLink(
     redirectDelay: number;
     cloakType: "redirect" | "iframe" | "meta-refresh";
     isActive: boolean;
+    trafficFilter: Partial<TrafficFilter>;
   }>
 ): CloakedLink | null {
   const link = links.get(slug);
@@ -271,6 +360,65 @@ export function updateLink(
   if (data.redirectDelay !== undefined) link.redirectDelay = data.redirectDelay;
   if (data.cloakType !== undefined) link.cloakType = data.cloakType;
   if (data.isActive !== undefined) link.isActive = data.isActive;
+  if (data.trafficFilter !== undefined) {
+    link.trafficFilter = { ...link.trafficFilter, ...data.trafficFilter };
+  }
 
   return link;
+}
+
+export function addDomain(domain: string, linkedSlug: string): CustomDomain {
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+  if (domains.has(normalized)) {
+    throw new Error(`Domain "${normalized}" is already registered`);
+  }
+
+  const cd: CustomDomain = {
+    id: crypto.randomUUID(),
+    domain: normalized,
+    verified: false,
+    createdAt: new Date().toISOString(),
+    linkedSlug,
+    sslEnabled: true,
+  };
+
+  domains.set(normalized, cd);
+  return cd;
+}
+
+export function getDomain(domain: string): CustomDomain | undefined {
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return domains.get(normalized);
+}
+
+export function getAllDomains(): CustomDomain[] {
+  return Array.from(domains.values()).sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
+export function verifyDomain(domain: string): boolean {
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const cd = domains.get(normalized);
+  if (!cd) return false;
+  cd.verified = true;
+  return true;
+}
+
+export function deleteDomain(domain: string): boolean {
+  const normalized = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return domains.delete(normalized);
+}
+
+export function getVerificationCode(domain: string): string {
+  return `cloak-verify-${domain.replace(/[^a-z0-9]/g, "")}`;
+}
+
+export function getLinkByDomain(host: string): CloakedLink | undefined {
+  const normalized = host.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const cd = domains.get(normalized);
+  if (!cd || !cd.verified) return undefined;
+  return links.get(cd.linkedSlug);
 }

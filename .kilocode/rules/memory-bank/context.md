@@ -2,76 +2,89 @@
 
 ## Current State
 
-**Status**: Full-featured link cloaking with analytics tracking
+**Status**: Production-ready link cloaking with custom domains, bot blocking, Nicegram ads, and full analytics
 
-The application is a comprehensive link cloaking tool with short URLs, custom white pages, full analytics tracking (device, browser, OS, referrer, screen, timezone, language), link management (enable/disable, edit, delete), and advanced options (password protection, expiry, max clicks, cloak types).
+The application is a comprehensive link cloaking platform with custom domain management, smart bot detection & blocking, Nicegram ad URL generation, traffic filtering (allow/block lists), and full analytics tracking.
 
 ## Recently Completed
 
 - [x] Base Next.js 16 setup with App Router
-- [x] TypeScript configuration with strict mode
-- [x] Tailwind CSS 4 integration
-- [x] ESLint configuration
-- [x] Memory bank documentation
-- [x] Recipe system for common features
+- [x] TypeScript, Tailwind CSS 4, ESLint configuration
 - [x] Link cloaking page (`/cloak`) with form UI
-- [x] API route for link CRUD (`/api/links`)
-- [x] White page redirect route (`/s/[slug]`)
+- [x] Links CRUD API (`/api/links`)
+- [x] White page redirect (`/s/[slug]`)
 - [x] In-memory link store (`src/lib/store.ts`)
-- [x] Home page with navigation to cloaking dashboard
-- [x] Full analytics tracking (device, browser, OS, referrer, screen, timezone, language)
-- [x] Device/browser/OS detection utility (`src/lib/detect.ts`)
-- [x] Click tracking API (`/api/track`)
-- [x] Analytics dashboard with tabbed views (Overview, Devices, Browsers, Sources, Click Log)
+- [x] Full analytics (device, browser, OS, referrer, screen, timezone, language)
 - [x] Link management: enable/disable, edit, delete
-- [x] Advanced options: cloak type (redirect/meta-refresh/iframe), redirect delay, max clicks, password, expiry date
-- [x] Link status tracking (active/inactive with auto-disable on expiry/max clicks)
+- [x] Advanced options: cloak type, redirect delay, max clicks, password, expiry
+- [x] **Bot detection system** (`src/lib/bot-detect.ts`) — detects 17+ known bots, crawlers, headless browsers, malicious scanners
+- [x] **Traffic filtering** — bot mode (block/redirect/allow), allow/block lists for referrers and user agents
+- [x] **Custom domain management** — add domains, verify via DNS TXT record, assign to links
+- [x] **Nicegram ad URLs** — auto-generated Telegram ad URLs per link
+- [x] **Traffic check API** (`/api/check`) — server-side bot detection
+- [x] **Click tracking API** (`/api/track`) — now includes bot verdict, bot type, traffic filter enforcement
+- [x] **Analytics panel** — 4 tabs: Overview, Devices, Bots, Click Log (with bot/verdict columns)
+- [x] **White page** — blocks bots, shows "Access Denied" for blocked traffic, handles redirect mode
 
 ## Current Structure
 
 | File/Directory | Purpose | Status |
 |----------------|---------|--------|
-| `src/app/page.tsx` | Home page with link to dashboard | Ready |
-| `src/app/layout.tsx` | Root layout | Ready |
-| `src/app/globals.css` | Global styles | Ready |
-| `src/app/cloak/page.tsx` | Link cloaking dashboard + analytics UI | Ready |
-| `src/app/api/links/route.ts` | Links CRUD API (GET/POST/PATCH/DELETE) | Ready |
-| `src/app/api/track/route.ts` | Click tracking API with analytics data | Ready |
-| `src/app/s/[slug]/page.tsx` | White page redirect with analytics collection | Ready |
-| `src/lib/store.ts` | In-memory link storage + analytics | Ready |
-| `src/lib/detect.ts` | Device/browser/OS detection utilities | Ready |
-| `.kilocode/` | AI context & recipes | Ready |
+| `src/app/page.tsx` | Home page | Ready |
+| `src/app/cloak/page.tsx` | Dashboard: links, domains, analytics, traffic filters | Ready |
+| `src/app/api/links/route.ts` | Links CRUD API | Ready |
+| `src/app/api/track/route.ts` | Click tracking with bot detection | Ready |
+| `src/app/api/domains/route.ts` | Custom domain management API | Ready |
+| `src/app/api/check/route.ts` | Bot detection check API | Ready |
+| `src/app/s/[slug]/page.tsx` | White page with bot blocking | Ready |
+| `src/lib/store.ts` | Store: links, domains, analytics, traffic filters | Ready |
+| `src/lib/detect.ts` | Client-side device/browser/OS detection | Ready |
+| `src/lib/bot-detect.ts` | Server-side bot detection engine | Ready |
 
 ## How It Works
 
-1. User creates a cloaked link at `/cloak` with:
-   - Destination URL, custom slug, custom domain
-   - White page title & description
-   - Advanced: cloak type, redirect delay, max clicks, password, expiry date
-2. Short URL generated (e.g., `/s/abc123` or `yourdomain.com/s/abc123`)
-3. Visitor hits `/s/[slug]`:
-   - Device/browser/OS/screen/timezone/language detected client-side
-   - Analytics sent to `/api/track`
-   - White page shown with verification animation
-   - Auto-redirect after configured delay
-4. Dashboard shows full analytics per link with tabbed views
+### Link Creation
+1. Create cloaked link at `/cloak` with destination URL, slug, white page settings
+2. Configure traffic filtering: bot mode (block/redirect/allow), allow/block lists
+3. Auto-generated Nicegram ad URL for Telegram ads
 
-## Analytics Tracked Per Click
+### Bot Detection (src/lib/bot-detect.ts)
+- Detects 17+ known bots (Google, Bing, Facebook, Telegram, etc.)
+- Detects crawlers, headless browsers, scrapers, malicious scanners
+- Scores traffic based on headers (Accept, Accept-Language, sec-ch-ua, etc.)
+- Verdicts: allow (<30 score), suspicious (30-59), block (60+)
 
-- Device type (desktop/mobile/tablet)
-- Browser name + version
-- Operating system + version
-- Referrer source
-- Screen resolution
-- Language
-- Timezone
-- IP address
-- Timestamp
+### Traffic Filtering
+- **Block mode**: Bots see "Access Denied" page
+- **Redirect mode**: Bots get redirected to safe URL
+- **Allow mode**: No filtering, all traffic passes
+- **Block lists**: Specific referrers and user agents blocked
+- **Allow lists**: Only listed referrers/user agents pass
+
+### Custom Domains
+1. Add domain in dashboard → "Custom Domains" tab
+2. Get DNS TXT verification code
+3. Add TXT record to your domain's DNS
+4. Click "Verify" to activate
+5. Assign domain to a cloaked link
+
+### Nicegram Ads
+- Each link gets auto-generated Nicegram ad URL
+- Format: `https://t.me/nicegram_bot?start=ad_{slug}`
+- Copy URL → paste in Nicegram ad campaign
+- Real users see white page, bots are blocked
+
+### Analytics Per Click
+- Device type, browser+version, OS+version
+- Referrer, screen resolution, language, timezone, IP
+- **Bot detection result** (isBot, botType, verdict)
+- Real vs bot click counts, blocked traffic counts
 
 ## Session History
 
 | Date | Changes |
 |------|---------|
-| Initial | Template created with base setup |
+| Initial | Template created |
 | Today | Built link cloaking with white pages and short URLs |
-| Today | Added full analytics tracking, device detection, link management, advanced options |
+| Today | Added analytics tracking, device detection, link management |
+| Today | Added bot detection, custom domains, Nicegram ads, traffic filtering |
