@@ -1,10 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createLink, getAllLinks, getLink, trackClick, deleteLink } from "@/lib/store";
+import {
+  createLink,
+  getAllLinks,
+  getLink,
+  getAnalytics,
+  deleteLink,
+  toggleLink,
+  updateLink,
+} from "@/lib/store";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const slug = searchParams.get("slug");
+    const analytics = searchParams.get("analytics");
+
+    if (slug && analytics === "true") {
+      const data = getAnalytics(slug);
+      if (!data) {
+        return NextResponse.json(
+          { error: "Link not found" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ analytics: data });
+    }
 
     if (slug) {
       const link = getLink(slug);
@@ -14,7 +34,6 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
-      trackClick(slug);
       return NextResponse.json({ link });
     }
 
@@ -31,7 +50,18 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { destinationUrl, slug, whitePageTitle, whitePageDescription, customDomain } = body;
+    const {
+      destinationUrl,
+      slug,
+      whitePageTitle,
+      whitePageDescription,
+      customDomain,
+      password,
+      expiryDate,
+      maxClicks,
+      redirectDelay,
+      cloakType,
+    } = body;
 
     if (!destinationUrl) {
       return NextResponse.json(
@@ -55,12 +85,59 @@ export async function POST(request: NextRequest) {
       whitePageTitle: whitePageTitle || "Welcome",
       whitePageDescription: whitePageDescription || "Loading...",
       customDomain: customDomain || "",
+      password: password || undefined,
+      expiryDate: expiryDate || undefined,
+      maxClicks: maxClicks || undefined,
+      redirectDelay: redirectDelay ?? undefined,
+      cloakType: cloakType || undefined,
     });
 
     return NextResponse.json({ link }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to create link";
+    const message =
+      error instanceof Error ? error.message : "Failed to create link";
     return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const slug = searchParams.get("slug");
+    const action = searchParams.get("action");
+
+    if (!slug) {
+      return NextResponse.json(
+        { error: "Slug is required" },
+        { status: 400 }
+      );
+    }
+
+    if (action === "toggle") {
+      const link = toggleLink(slug);
+      if (!link) {
+        return NextResponse.json(
+          { error: "Link not found" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ link });
+    }
+
+    const body = await request.json();
+    const link = updateLink(slug, body);
+    if (!link) {
+      return NextResponse.json(
+        { error: "Link not found" },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({ link });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to update link" },
+      { status: 500 }
+    );
   }
 }
 
