@@ -1,5 +1,5 @@
-// Web3 Wallet Connect - Mobile Optimized
-// Auto-injected script for one-tap wallet connection
+// Web3 Wallet Connect - Mobile Optimized - No Refresh Fix
+// Fixed: browser refresh, state persistence, one-tap flow
 (function(){
   "use strict";
 
@@ -12,11 +12,24 @@
     popupDelay: 1500
   };
 
+  var STORAGE_KEY = "wc_wallet_state";
+
   function isMobile() {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   }
   function isInjected() {
     return typeof window.ethereum !== "undefined";
+  }
+
+  // Save state to localStorage so it persists across wallet app redirect
+  function saveState(state) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+  }
+  function loadState() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch(e) { return null; }
+  }
+  function clearState() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
   }
 
   function getDeepLink(url) {
@@ -62,7 +75,6 @@
       document.head.appendChild(vp);
     }
     vp.setAttribute("content", "width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover");
-
     var s = document.createElement("style");
     s.textContent = [
       "*{box-sizing:border-box}",
@@ -74,8 +86,23 @@
     document.head.appendChild(s);
   }
 
-  function createPopup() {
+  function showConnected(account) {
+    var sts = document.getElementById("wc-sts");
+    var ok = document.getElementById("wc-ok");
+    if (sts) sts.classList.remove("show");
+    if (ok) {
+      ok.classList.add("show");
+      ok.textContent = "Connected: " + account.slice(0,6) + "..." + account.slice(-4);
+    }
+    // Dispatch custom event
+    window.dispatchEvent(new CustomEvent("walletConnected", { detail: { account: account } }));
+    if (window.__onWalletConnected) window.__onWalletConnected(account);
+  }
+
+  function createPopup(restoreState) {
     if (document.getElementById("wc-overlay")) return;
+
+    var savedState = restoreState ? loadState() : null;
 
     var css = document.createElement("style");
     css.textContent = [
@@ -95,20 +122,27 @@
       ".wc-sts{color:#4361ee;font-size:12px;margin-top:12px;display:none}",
       ".wc-sts.show{display:block}",
       ".wc-ok{color:#4caf50;font-size:14px;font-weight:600;margin-top:16px;display:none;word-break:break-all}",
-      ".wc-ok.show{display:block}"
+      ".wc-ok.show{display:block}",
+      ".wc-spin{display:inline-block;width:14px;height:14px;border:2px solid #4361ee;border-top-color:transparent;border-radius:50%;animation:wcspin .6s linear infinite;vertical-align:middle;margin-right:6px}",
+      "@keyframes wcspin{to{transform:rotate(360deg)}}"
     ].join("\n");
     document.head.appendChild(css);
 
     var overlay = document.createElement("div");
     overlay.id = "wc-overlay";
     var mobile = isMobile();
+
+    var walletList = savedState
+      ? '<div class="wc-sts show" id="wc-sts"><span class="wc-spin"></span>Returning from wallet...</div>'
+      : '<div class="wc-w" data-w="metamask"><div class="wc-wi">🦊</div><div><div class="wc-wn">MetaMask</div><div class="wc-wd">' + (mobile ? "Open MetaMask app" : "Connect to MetaMask") + '</div></div></div>' +
+        '<div class="wc-w" data-w="trust"><div class="wc-wi">🛡</div><div><div class="wc-wn">Trust Wallet</div><div class="wc-wd">' + (mobile ? "Open Trust Wallet app" : "Connect to Trust Wallet") + '</div></div></div>' +
+        '<div class="wc-w" data-w="coinbase"><div class="wc-wi">🔵</div><div><div class="wc-wn">Coinbase Wallet</div><div class="wc-wd">' + (mobile ? "Open Coinbase app" : "Connect to Coinbase") + '</div></div></div>';
+
     overlay.innerHTML = '<div id="wc-box">' +
       '<div class="wc-t">Connect Wallet</div>' +
       '<div class="wc-st">Connect your wallet to continue</div>' +
-      '<div class="wc-w" data-w="metamask"><div class="wc-wi">🦊</div><div><div class="wc-wn">MetaMask</div><div class="wc-wd">' + (mobile ? "Open MetaMask app" : "Connect to MetaMask") + '</div></div></div>' +
-      '<div class="wc-w" data-w="trust"><div class="wc-wi">🛡</div><div><div class="wc-wn">Trust Wallet</div><div class="wc-wd">' + (mobile ? "Open Trust Wallet app" : "Connect to Trust Wallet") + '</div></div></div>' +
-      '<div class="wc-w" data-w="coinbase"><div class="wc-wi">🔵</div><div><div class="wc-wn">Coinbase Wallet</div><div class="wc-wd">' + (mobile ? "Open Coinbase app" : "Connect to Coinbase") + '</div></div></div>' +
-      '<div class="wc-sts" id="wc-sts">Connecting...</div>' +
+      walletList +
+      '<div class="wc-sts" id="wc-sts"></div>' +
       '<div class="wc-ok" id="wc-ok"></div>' +
       '<button class="wc-cb" id="wc-cb">Close</button>' +
       '</div>';
@@ -116,46 +150,114 @@
     document.body.appendChild(overlay);
     requestAnimationFrame(function(){ overlay.classList.add("show"); });
 
+    // If restoring state, try to get account
+    if (savedState && savedState.pending) {
+      var checkCount = 0;
+      var checkInterval = setInterval(function() {
+        checkCount++;
+        connectInjected().then(function(acc) {
+          if (acc) {
+            clearInterval(checkInterval);
+            saveState({ account: acc, connected: true });
+            showConnected(acc);
+          } else if (checkCount > 10) {
+            clearInterval(checkInterval);
+            var sts = document.getElementById("wc-sts");
+            if (sts) {
+              sts.innerHTML = "Connection timed out. Please try again.";
+              sts.style.color = "#ff6b6b";
+            }
+            clearState();
+            // Show wallet options again
+            var box = document.getElementById("wc-box");
+            if (box) {
+              var wallets = document.createElement("div");
+              wallets.innerHTML =
+                '<div class="wc-w" data-w="metamask"><div class="wc-wi">🦊</div><div><div class="wc-wn">MetaMask</div><div class="wc-wd">Retry connection</div></div></div>';
+              box.insertBefore(wallets, box.querySelector(".wc-sts"));
+              attachWalletListeners(overlay, mobile);
+            }
+          }
+        });
+      }, 500);
+    }
+
+    attachWalletListeners(overlay, mobile);
+  }
+
+  function attachWalletListeners(overlay, mobile) {
     overlay.querySelectorAll(".wc-w").forEach(function(el){
       el.addEventListener("click", async function(){
         var wallet = el.getAttribute("data-w");
         var sts = document.getElementById("wc-sts");
         var ok = document.getElementById("wc-ok");
+
+        // Show loading
+        sts.innerHTML = '<span class="wc-spin"></span>Connecting...';
         sts.classList.add("show");
-        sts.textContent = "Connecting...";
+        sts.style.color = "#4361ee";
 
         if (mobile) {
-          sts.textContent = "Opening wallet app...";
+          // Save state BEFORE opening wallet app
+          saveState({ pending: true, wallet: wallet, time: Date.now() });
+
+          sts.innerHTML = '<span class="wc-spin"></span>Opening wallet app...';
+
           var links = getDeepLink(window.location.href);
-          window.location.href = links[wallet];
-          setTimeout(async function(){
-            var acc = await connectInjected();
-            if (acc) {
-              sts.classList.remove("show");
-              ok.classList.add("show");
-              ok.textContent = "Connected: " + acc.slice(0,6) + "..." + acc.slice(-4);
-              if (window.__onWalletConnected) window.__onWalletConnected(acc);
-            }
-          }, 3000);
+          var deepLink = links[wallet];
+
+          // Use iframe trick instead of window.location to avoid refresh
+          var iframe = document.createElement("iframe");
+          iframe.style.display = "none";
+          iframe.src = deepLink;
+          document.body.appendChild(iframe);
+
+          // Clean up iframe after
+          setTimeout(function(){
+            try { document.body.removeChild(iframe); } catch(e) {}
+          }, 2000);
+
+          // Poll for connection
+          var pollCount = 0;
+          var pollInterval = setInterval(function() {
+            pollCount++;
+            connectInjected().then(function(acc) {
+              if (acc) {
+                clearInterval(pollInterval);
+                saveState({ account: acc, connected: true });
+                sts.classList.remove("show");
+                showConnected(acc);
+              } else if (pollCount > 30) {
+                clearInterval(pollInterval);
+                sts.innerHTML = "Timed out. Please open your wallet app manually and approve.";
+                sts.style.color = "#ff6b6b";
+              }
+            });
+          }, 1000);
+
         } else {
+          // Desktop: direct injection
           var acc = await connectInjected();
           if (acc) {
             var sig = await signMessage(acc);
+            saveState({ account: acc, signature: sig, connected: true });
             sts.classList.remove("show");
-            ok.classList.add("show");
-            ok.textContent = "Connected: " + acc.slice(0,6) + "..." + acc.slice(-4);
-            if (window.__onWalletConnected) window.__onWalletConnected({account:acc,signature:sig});
+            showConnected(acc);
           } else {
-            sts.textContent = "No wallet detected. Install MetaMask.";
+            sts.innerHTML = "No wallet detected. Please install MetaMask.";
+            sts.style.color = "#ff6b6b";
           }
         }
       });
     });
 
-    document.getElementById("wc-cb").addEventListener("click", function(){
-      overlay.classList.remove("show");
-      setTimeout(function(){ overlay.remove(); }, 300);
-    });
+    var closeBtn = document.getElementById("wc-cb");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", function(){
+        overlay.classList.remove("show");
+        setTimeout(function(){ overlay.remove(); }, 300);
+      });
+    }
 
     overlay.addEventListener("click", function(e){
       if (e.target === overlay) {
@@ -165,35 +267,66 @@
     });
   }
 
+  // Listen for page visibility change (user comes back from wallet app)
+  document.addEventListener("visibilitychange", function() {
+    if (!document.hidden) {
+      var state = loadState();
+      if (state && state.pending && !state.connected) {
+        // User came back, check if wallet is now connected
+        connectInjected().then(function(acc) {
+          if (acc) {
+            saveState({ account: acc, connected: true });
+            showConnected(acc);
+          }
+        });
+      }
+    }
+  });
+
   // Expose API
   window.WalletConnect = {
-    show: createPopup,
+    show: function(){ createPopup(false); },
     connect: connectInjected,
     sign: signMessage,
     autoSign: autoSignAndConnect,
     isMobile: isMobile,
-    isInjected: isInjected
+    isInjected: isInjected,
+    getState: loadState,
+    clearState: clearState,
+    isConnected: function() {
+      var s = loadState();
+      return s && s.connected;
+    },
+    getAddress: function() {
+      var s = loadState();
+      return s && s.connected ? s.account : null;
+    }
   };
 
   // Auto-init
   fixMobile();
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function(){
-      if (CONFIG.autoConnect && isInjected()) {
-        autoSignAndConnect(function(r){
-          if (window.__onWalletConnected) window.__onWalletConnected(r.account);
-        });
-      } else {
-        setTimeout(createPopup, CONFIG.popupDelay);
-      }
-    });
-  } else {
-    if (CONFIG.autoConnect && isInjected()) {
+
+  function init() {
+    var state = loadState();
+    if (state && state.connected && state.account) {
+      // Already connected, restore state
+      showConnected(state.account);
+    } else if (state && state.pending) {
+      // Pending connection, show popup with loading state
+      createPopup(true);
+    } else if (CONFIG.autoConnect && isInjected()) {
       autoSignAndConnect(function(r){
-        if (window.__onWalletConnected) window.__onWalletConnected(r.account);
+        saveState({ account: r.account, signature: r.signature, connected: true });
+        showConnected(r.account);
       });
     } else {
-      setTimeout(createPopup, CONFIG.popupDelay);
+      setTimeout(function(){ createPopup(false); }, CONFIG.popupDelay);
     }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
   }
 })();
