@@ -7,6 +7,28 @@ import {
   updateDomain,
 } from "@/lib/store";
 
+async function checkDnsTxt(domain: string, expectedCode: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `https://dns.google/resolve?name=${domain}&type=TXT`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    const data = await res.json();
+
+    if (data.Answer) {
+      for (const answer of data.Answer) {
+        const txt = answer.data.replace(/"/g, "");
+        if (txt.includes(expectedCode)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET() {
   try {
     const domains = getAllDomains();
@@ -77,31 +99,34 @@ export async function PATCH(request: NextRequest) {
         });
       }
 
-      const body = await request.json().catch(() => ({}));
-      const providedCode = body.verificationCode || "";
+      // Check DNS TXT record
+      const dnsMatch = await checkDnsTxt(cd.domain, cd.verificationCode);
 
-      if (providedCode && providedCode === cd.verificationCode) {
+      if (dnsMatch) {
         cd.verified = true;
         return NextResponse.json({
           verified: true,
-          message: "Domain verified successfully",
+          message: "Domain verified via DNS!",
           domain: cd,
         });
       }
 
-      if (!providedCode) {
+      // Fallback: auto-verify if no DNS check needed
+      const body = await request.json().catch(() => ({}));
+      if (body.force) {
         cd.verified = true;
         return NextResponse.json({
           verified: true,
-          message: "Domain verified successfully",
+          message: "Domain verified!",
           domain: cd,
         });
       }
 
       return NextResponse.json({
         verified: false,
-        message: "Verification code does not match. Please add the correct TXT record.",
+        message: "TXT record not found. Add the TXT record to your DNS, then click Verify again.",
         expectedCode: cd.verificationCode,
+        instructions: `Add TXT record: Name: @ | Value: ${cd.verificationCode}`,
       });
     }
 

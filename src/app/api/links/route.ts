@@ -3,11 +3,14 @@ import {
   createLink,
   getAllLinks,
   getLink,
-  getAnalytics,
   deleteLink,
   toggleLink,
   updateLink,
-} from "@/lib/db-store";
+  trackClick,
+  getAnalytics,
+} from "@/lib/store";
+import { detectBot } from "@/lib/bot-detect";
+import { detectPlatformReviewer, shouldShowSafePage } from "@/lib/platform-detect";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +19,7 @@ export async function GET(request: NextRequest) {
     const analytics = searchParams.get("analytics");
 
     if (slug && analytics === "true") {
-      const data = await getAnalytics(slug);
+      const data = getAnalytics(slug);
       if (!data) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -27,7 +30,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (slug) {
-      const link = await getLink(slug);
+      const link = getLink(slug);
       if (!link) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -37,7 +40,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ link });
     }
 
-    const links = await getAllLinks();
+    const links = getAllLinks();
     return NextResponse.json({ links });
   } catch {
     return NextResponse.json(
@@ -63,17 +66,6 @@ export async function POST(request: NextRequest) {
       maxClicks,
       redirectDelay,
       cloakType,
-      trafficBotMode,
-      trafficBotRedirectUrl,
-      trafficBlockedReferrers,
-      trafficAllowedReferrers,
-      trafficBlockedUserAgents,
-      trafficAllowedUserAgents,
-      geoAllowedCountries,
-      geoBlockedCountries,
-      blockFacebookReviewers,
-      blockTikTokReviewers,
-      blockGoogleReviewers,
     } = body;
 
     if (!destinationUrl) {
@@ -92,7 +84,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const link = await createLink({
+    const link = createLink({
       destinationUrl,
       slug: slug || undefined,
       whitePageTitle: whitePageTitle || "Welcome",
@@ -103,12 +95,6 @@ export async function POST(request: NextRequest) {
       maxClicks: maxClicks || undefined,
       redirectDelay: redirectDelay ?? undefined,
       cloakType: cloakType || undefined,
-      trafficBotMode: trafficBotMode || undefined,
-      trafficBotRedirectUrl: trafficBotRedirectUrl || undefined,
-      trafficBlockedReferrers: trafficBlockedReferrers || undefined,
-      trafficAllowedReferrers: trafficAllowedReferrers || undefined,
-      trafficBlockedUserAgents: trafficBlockedUserAgents || undefined,
-      trafficAllowedUserAgents: trafficAllowedUserAgents || undefined,
     });
 
     return NextResponse.json({ link }, { status: 201 });
@@ -133,7 +119,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "toggle") {
-      const link = await toggleLink(slug);
+      const link = toggleLink(slug);
       if (!link) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -144,7 +130,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const link = await updateLink(slug, body);
+    const link = updateLink(slug, body);
     if (!link) {
       return NextResponse.json(
         { error: "Link not found" },
@@ -172,7 +158,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const deleted = await deleteLink(slug);
+    const deleted = deleteLink(slug);
     if (!deleted) {
       return NextResponse.json(
         { error: "Link not found" },

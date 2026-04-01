@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { trackClick, getLink } from "@/lib/db-store";
+import { trackClick, getLink } from "@/lib/store";
 import { detectBot } from "@/lib/bot-detect";
-import { detectPlatformReviewer, shouldShowSafePage, checkGeoAccess } from "@/lib/platform-detect";
+import { detectPlatformReviewer, shouldShowSafePage } from "@/lib/platform-detect";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Slug is required" }, { status: 400 });
     }
 
-    const link = await getLink(slug);
+    const link = getLink(slug);
     if (!link) {
       return NextResponse.json({ error: "Link not found" }, { status: 404 });
     }
@@ -34,96 +34,66 @@ export async function POST(request: NextRequest) {
     // 1. Bot detection
     const botResult = detectBot(userAgent, headers, analytics.referrer || refererHeader);
 
-    // 2. Platform reviewer detection (Facebook, TikTok, Google)
+    // 2. Platform reviewer detection
     const platformResult = detectPlatformReviewer(
       ip,
       userAgent,
       analytics.referrer || refererHeader
     );
 
-    // 3. Geo filtering
-    const geoAllowed = link.geoAllowedCountries
-      ? JSON.parse(link.geoAllowedCountries as string)
-      : [];
-    const geoBlocked = link.geoBlockedCountries
-      ? JSON.parse(link.geoBlockedCountries as string)
-      : [];
-    const geoResult = checkGeoAccess(
-      analytics.country || "Unknown",
-      geoAllowed,
-      geoBlocked
-    );
-
-    // 4. Referrer blocking
-    const blockedRefs = link.trafficBlockedReferrers
-      ? JSON.parse(link.trafficBlockedReferrers as string)
-      : [];
-    const allowedRefs = link.trafficAllowedReferrers
-      ? JSON.parse(link.trafficAllowedReferrers as string)
-      : [];
-    const blockedUAs = link.trafficBlockedUserAgents
-      ? JSON.parse(link.trafficBlockedUserAgents as string)
-      : [];
-
     let shouldBlock = false;
     let showSafePage = false;
     let blockReason = "";
 
-    // Check bot blocking
-    if (link.trafficBotMode === "block" && botResult.isBot) {
+    // Bot blocking
+    const botMode = (link as unknown as Record<string, unknown>).trafficBotMode as string || "block";
+    if (botMode === "block" && botResult.isBot) {
       shouldBlock = true;
       blockReason = botResult.reasons.join(", ") || "Bot detected";
     }
 
-    // Check platform reviewer -> safe page
+    // Platform reviewer -> safe page
+    const safePageUrl = (link as unknown as Record<string, unknown>).safePageUrl as string || "";
+    const blockFb = (link as unknown as Record<string, unknown>).blockFacebookReviewers as boolean ?? true;
+    const blockTt = (link as unknown as Record<string, unknown>).blockTikTokReviewers as boolean ?? true;
+    const blockGg = (link as unknown as Record<string, unknown>).blockGoogleReviewers as boolean ?? true;
+
     if (
+      safePageUrl &&
       shouldShowSafePage(platformResult, {
-        safePageUrl: link.safePageUrl || "",
-        blockFacebookReviewers: link.blockFacebookReviewers ?? true,
-        blockTikTokReviewers: link.blockTikTokReviewers ?? true,
-        blockGoogleReviewers: link.blockGoogleReviewers ?? true,
+        safePageUrl,
+        blockFacebookReviewers: blockFb,
+        blockTikTokReviewers: blockTt,
+        blockGoogleReviewers: blockGg,
       })
     ) {
       showSafePage = true;
     }
 
-    // Check geo blocking
-    if (!geoResult.allowed) {
-      shouldBlock = true;
-      blockReason = geoResult.reason;
-    }
+    // Referrer blocking
+    const trafficFilter = (link as unknown as Record<string, unknown>).trafficFilter as Record<string, unknown> | undefined;
+    if (trafficFilter) {
+      const blockedRefs = (trafficFilter.blockedReferrers as string[]) || [];
+      const blockedUAs = (trafficFilter.blockedUserAgents as string[]) || [];
 
-    // Check referrer blocking
-    if (blockedRefs.length > 0) {
-      const ref = (analytics.referrer || refererHeader || "").toLowerCase();
-      for (const blocked of blockedRefs) {
-        if (ref.includes(blocked.toLowerCase())) {
-          shouldBlock = true;
-          blockReason = `Referrer blocked: ${blocked}`;
-          break;
+      if (blockedRefs.length > 0) {
+        const ref = (analytics.referrer || refererHeader || "").toLowerCase();
+        for (const blocked of blockedRefs) {
+          if (ref.includes(blocked.toLowerCase())) {
+            shouldBlock = true;
+            blockReason = `Referrer blocked: ${blocked}`;
+            break;
+          }
         }
       }
-    }
 
-    // Check allowed referrers
-    if (allowedRefs.length > 0) {
-      const ref = (analytics.referrer || refererHeader || "").toLowerCase();
-      const isAllowed = allowedRefs.some((a: string) =>
-        ref.includes(a.toLowerCase())
-      );
-      if (!isAllowed && ref) {
-        shouldBlock = true;
-        blockReason = "Referrer not in allowed list";
-      }
-    }
-
-    // Check blocked user agents
-    if (blockedUAs.length > 0) {
-      for (const blocked of blockedUAs) {
-        if (userAgent.toLowerCase().includes(blocked.toLowerCase())) {
-          shouldBlock = true;
-          blockReason = `User agent blocked: ${blocked}`;
-          break;
+      if (blockedUAs.length > 0) {
+        for (const blocked of blockedUAs) {
+          if (userAgent.toLowerCase().includes(blocked.toLowerCase())) {
+            shouldBlock = true;
+            blockReason = `User agent blocked: ${blocked}`;
+            break;
+          }
         }
       }
     }
@@ -131,11 +101,11 @@ export async function POST(request: NextRequest) {
     const verdict = shouldBlock
       ? "block"
       : showSafePage
-        ? "safe_page"
+        ? "allow"
         : botResult.verdict;
 
-    // Track the click
-    await trackClick(slug, {
+    // Track click
+    trackClick(slug, {
       device: analytics.device || "unknown",
       browser: analytics.browser || "Unknown",
       browserVersion: analytics.browserVersion || "",
@@ -155,42 +125,31 @@ export async function POST(request: NextRequest) {
       verdict,
     });
 
-    // Response logic
+    // Response
     if (shouldBlock) {
       return NextResponse.json({
         success: true,
         blocked: true,
-        reason: blockReason || "Blocked by traffic filter",
+        reason: blockReason || "Blocked",
       });
     }
 
-    // Platform reviewer -> show safe page
-    if (showSafePage && link.safePageUrl) {
+    if (showSafePage && safePageUrl) {
       return NextResponse.json({
         success: true,
-        redirect: link.safePageUrl,
+        redirect: safePageUrl,
         isSafePage: true,
         platform: platformResult.platform,
       });
     }
 
-    // Suspicious traffic -> redirect to safe URL
-    if (
-      botResult.verdict === "suspicious" &&
-      link.trafficBotMode === "redirect" &&
-      link.trafficBotRedirectUrl
-    ) {
-      return NextResponse.json({
-        success: true,
-        redirect: link.trafficBotRedirectUrl,
-      });
-    }
-
     // Real user -> money page or destination
-    const destinationUrl = link.moneyPageUrl || link.destinationUrl;
+    const moneyPageUrl = (link as unknown as Record<string, unknown>).moneyPageUrl as string || "";
+    const destination = moneyPageUrl || link.destinationUrl;
+
     return NextResponse.json({
       success: true,
-      redirect: destinationUrl,
+      redirect: destination,
       isMoneyPage: true,
     });
   } catch {

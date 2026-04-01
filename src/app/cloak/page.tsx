@@ -621,14 +621,14 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
     }
   };
 
-  const handleVerify = async (domain: string) => {
+  const handleVerify = async (domain: string, force = false) => {
     setVerifying(domain);
     setError("");
     try {
       const res = await fetch(`/api/domains?domain=${domain}&action=verify`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ force }),
       });
       const data = await res.json();
       if (data.verified) {
@@ -639,7 +639,8 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
         setShowInstructions(null);
         setTimeout(() => setSuccess(""), 3000);
       } else {
-        setError(data.message || "Verification failed. Make sure you added the TXT record.");
+        setError(data.message || "DNS check failed. Add TXT record or click Force Verify.");
+        setShowInstructions(domain);
       }
     } catch {
       setError("Verification failed");
@@ -749,13 +750,22 @@ function DomainManager({ links }: { links: CloakedLink[] }) {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {!d.verified && (
-                    <button
-                      onClick={() => handleVerify(d.domain)}
-                      disabled={verifying === d.domain}
-                      className="px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors disabled:opacity-50"
-                    >
-                      {verifying === d.domain ? "Verifying..." : "Verify Now"}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleVerify(d.domain)}
+                        disabled={verifying === d.domain}
+                        className="px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded transition-colors disabled:opacity-50"
+                      >
+                        {verifying === d.domain ? "Verifying..." : "Verify Now"}
+                      </button>
+                      <button
+                        onClick={() => handleVerify(d.domain, true)}
+                        disabled={verifying === d.domain}
+                        className="px-3 py-1.5 text-xs bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded transition-colors disabled:opacity-50"
+                      >
+                        Force Verify
+                      </button>
+                    </>
                   )}
                   {d.verified && (
                     <button

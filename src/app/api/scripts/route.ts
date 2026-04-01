@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  createSavedScript,
-  getSavedScripts,
-  getSavedScript,
-  deleteSavedScript,
-  updateSavedScript,
-} from "@/lib/db-store";
+
+interface SavedScript {
+  id: string;
+  name: string;
+  injectHead: string;
+  injectBodyStart: string;
+  injectBodyEnd: string;
+  createdAt: string;
+}
+
+const scripts = new Map<string, SavedScript>();
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,15 +17,18 @@ export async function GET(request: NextRequest) {
     const id = searchParams.get("id");
 
     if (id) {
-      const script = await getSavedScript(id);
+      const script = scripts.get(id);
       if (!script) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json({ script });
     }
 
-    const scripts = await getSavedScripts();
-    return NextResponse.json({ scripts });
+    const all = Array.from(scripts.values()).sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    return NextResponse.json({ scripts: all });
   } catch {
     return NextResponse.json(
       { error: "Failed to fetch scripts" },
@@ -39,37 +46,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
-    const script = await createSavedScript({
+    const script: SavedScript = {
+      id: crypto.randomUUID(),
       name,
       injectHead: injectHead || "",
       injectBodyStart: injectBodyStart || "",
       injectBodyEnd: injectBodyEnd || "",
-    });
+      createdAt: new Date().toISOString(),
+    };
 
+    scripts.set(script.id, script);
     return NextResponse.json({ script }, { status: 201 });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "Failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-export async function PATCH(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json({ error: "ID required" }, { status: 400 });
-    }
-
-    const body = await request.json();
-    const updated = await updateSavedScript(id, body);
-
-    if (!updated) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ script: updated });
   } catch {
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
@@ -84,7 +71,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "ID required" }, { status: 400 });
     }
 
-    await deleteSavedScript(id);
+    scripts.delete(id);
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed" }, { status: 500 });
