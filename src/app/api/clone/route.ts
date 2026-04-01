@@ -1,6 +1,172 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 
+function makeHtmlSafe(html: string): string {
+  let result = html;
+
+  // Remove Google Analytics (UA + GA4)
+  result = result.replace(
+    /<!-- Google Analytics -->[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*googletagmanager\.com[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*google-analytics\.com[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*window\.dataLayer[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*gtag\([\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*\(function\s*\(\s*w\s*,\s*d\s*,\s*s\s*,\s*l\s*,\s*i\s*\)[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Remove Google Tag Manager
+  result = result.replace(
+    /<!-- Google Tag Manager -->[\s\S]*?<!-- End Google Tag Manager -->\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<noscript>\s*<iframe[^>]*googletagmanager[^>]*>[\s\S]*?<\/noscript>\s*/gi,
+    ""
+  );
+
+  // Remove Facebook Pixel
+  result = result.replace(
+    /<!-- Facebook Pixel Code -->[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*!function\s*\(\s*f\s*,\s*b\s*,\s*e\s*,\s*v\s*,\s*t\s*,\s*s\s*\)[\s\S]*?fbq\([\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*fbq\s*\([\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<noscript>\s*<img[^>]*facebook\.com\/tr[^>]*>\s*<\/noscript>\s*/gi,
+    ""
+  );
+
+  // Remove Yandex Metrika
+  result = result.replace(
+    /<!-- Yandex[\s\S]*?Metrika[\s\S]*?-->[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*>\s*\(function\s*\(\s*m\s*,\s*e\s*,\s*t\s*,\s*r\s*,\s*i\s*,\s*k\s*,\s*a\s*\)[\s\S]*?yandex[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Remove Hotjar
+  result = result.replace(
+    /<script[^>]*>\s*\(function\s*\(\s*h\s*,\s*o\s*,\s*t\s*,\s*j\s*,\s*a\s*,\s*r\s*\)[\s\S]*?hotjar[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Remove TikTok Pixel
+  result = result.replace(
+    /<script[^>]*>\s*!function\s*\(\s*w\s*,\s*d\s*,\s*t\s*\)[\s\S]*?tiktok[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Remove Microsoft Clarity
+  result = result.replace(
+    /<script[^>]*>\s*\(function\s*\(\s*c\s*,\s*l\s*,\s*a\s*,\s*r\s*,\s*i\s*,\s*t\s*\)[\s\S]*?clarity[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Remove generic tracking scripts by common patterns
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*analytics[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*tracking[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*pixel[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*clarity[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+  result = result.replace(
+    /<script[^>]*src=["'][^"']*hotjar[^"']*["'][^>]*><\/script>\s*/gi,
+    ""
+  );
+
+  // Remove HTML comments (but keep conditional comments)
+  result = result.replace(/<!--(?!\[if)[\s\S]*?-->/g, "");
+
+  // Remove generator meta tags (WordPress, etc.)
+  result = result.replace(
+    /<meta[^>]*name=["']generator["'][^>]*>\s*/gi,
+    ""
+  );
+
+  // Remove copyright/author comments in meta
+  result = result.replace(
+    /<meta[^>]*name=["'](?:copyright|author|creator|rights)["'][^>]*>\s*/gi,
+    ""
+  );
+
+  // Remove structured data / JSON-LD that might identify original site
+  result = result.replace(
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>\s*/gi,
+    ""
+  );
+
+  // Clean up multiple blank lines
+  result = result.replace(/\n\s*\n\s*\n/g, "\n\n");
+
+  return result;
+}
+
+function injectScripts(
+  html: string,
+  headScript: string,
+  bodyStartScript: string,
+  bodyEndScript: string
+): string {
+  let result = html;
+
+  if (headScript) {
+    result = result.replace(
+      /(<\/head>)/i,
+      `${headScript}\n$1`
+    );
+  }
+
+  if (bodyStartScript) {
+    result = result.replace(
+      /(<body[^>]*>)/i,
+      `$1\n${bodyStartScript}`
+    );
+  }
+
+  if (bodyEndScript) {
+    result = result.replace(
+      /(<\/body>)/i,
+      `${bodyEndScript}\n$1`
+    );
+  }
+
+  return result;
+}
+
 interface ClonedFile {
   path: string;
   size: number;
@@ -354,7 +520,7 @@ function rewriteTextContent(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { url: inputUrl } = body;
+    const { url: inputUrl, injectHead, injectBodyStart, injectBodyEnd, makeSafe } = body;
 
     if (!inputUrl) {
       return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -477,13 +643,20 @@ export async function POST(request: NextRequest) {
       if (isTextFile) {
         const text = data.data.toString("utf-8");
         const isCss = filePath.endsWith(".css");
+        const isHtml = filePath.endsWith(".html") || filePath.endsWith(".htm");
         const resourceBase = new URL(url);
-        const rewritten = rewriteTextContent(
+        let rewritten = rewriteTextContent(
           text,
           isCss,
           resourceBase,
           urlToPath
         );
+
+        // Apply anti-detection to all HTML files
+        if (isHtml && makeSafe !== false) {
+          rewritten = makeHtmlSafe(rewritten);
+        }
+
         zip.file(filePath, rewritten);
         totalSize += Buffer.byteLength(rewritten, "utf-8");
       } else {
@@ -498,13 +671,29 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 6: Rewrite and save index.html
-    const rewrittenHtml = rewriteTextContent(
+    // Step 6: Rewrite, make safe, inject scripts, and save index.html
+    let rewrittenHtml = rewriteTextContent(
       htmlContent,
       false,
       targetUrl,
       urlToPath
     );
+
+    // Anti-detection: strip original tracking, comments, meta
+    if (makeSafe !== false) {
+      rewrittenHtml = makeHtmlSafe(rewrittenHtml);
+    }
+
+    // Inject custom scripts
+    if (injectHead || injectBodyStart || injectBodyEnd) {
+      rewrittenHtml = injectScripts(
+        rewrittenHtml,
+        injectHead || "",
+        injectBodyStart || "",
+        injectBodyEnd || ""
+      );
+    }
+
     zip.file("index.html", rewrittenHtml);
     totalSize += Buffer.byteLength(rewrittenHtml, "utf-8");
 

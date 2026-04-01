@@ -859,6 +859,11 @@ function ZipUploadManager() {
   const [scriptBodyEnd, setScriptBodyEnd] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [scriptName, setScriptName] = useState("");
+  const [savedScripts, setSavedScripts] = useState<
+    { id: string; name: string; injectHead: string; injectBodyStart: string; injectBodyEnd: string }[]
+  >([]);
   const [result, setResult] = useState<{
     fileName: string;
     fileCount: number;
@@ -876,9 +881,59 @@ function ZipUploadManager() {
       .catch(() => {});
   }, []);
 
+  const fetchScripts = useCallback(() => {
+    fetch("/api/scripts")
+      .then((r) => r.json())
+      .then((d) => setSavedScripts(d.scripts || []))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetchProjects();
-  }, [fetchProjects]);
+    fetchScripts();
+  }, [fetchProjects, fetchScripts]);
+
+  const handleSaveScript = async () => {
+    if (!scriptName.trim()) return;
+    try {
+      const res = await fetch("/api/scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: scriptName,
+          injectHead: scriptHead,
+          injectBodyStart: scriptBodyStart,
+          injectBodyEnd: scriptBodyEnd,
+        }),
+      });
+      if (res.ok) {
+        setScriptName("");
+        setSuccess("Script saved!");
+        setTimeout(() => setSuccess(""), 2000);
+        fetchScripts();
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleLoadScript = (id: string) => {
+    const s = savedScripts.find((x) => x.id === id);
+    if (s) {
+      setScriptHead(s.injectHead || "");
+      setScriptBodyStart(s.injectBodyStart || "");
+      setScriptBodyEnd(s.injectBodyEnd || "");
+    }
+  };
+
+  const handleDeleteScript = async (id: string) => {
+    try {
+      await fetch(`/api/scripts?id=${id}`, { method: "DELETE" });
+      setSavedScripts((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      // silently fail
+    }
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -969,6 +1024,38 @@ function ZipUploadManager() {
           </div>
         )}
 
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        {savedScripts.length > 0 && (
+          <div className="mb-4 p-3 bg-neutral-800/50 border border-neutral-700/50 rounded-lg">
+            <p className="text-xs text-neutral-400 mb-2 font-medium">Saved Scripts</p>
+            <div className="flex flex-wrap gap-2">
+              {savedScripts.map((s) => (
+                <div key={s.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleLoadScript(s.id)}
+                    className="px-2.5 py-1 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded transition-colors"
+                  >
+                    {s.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteScript(s.id)}
+                    className="text-xs text-red-400/50 hover:text-red-400"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleUpload} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-neutral-300 mb-1.5">
@@ -1048,13 +1135,33 @@ function ZipUploadManager() {
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={uploading || !file}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
-          >
-            {uploading ? "Processing..." : "Upload & Inject Scripts"}
-          </button>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Script name (to save)"
+              value={scriptName}
+              onChange={(e) => setScriptName(e.target.value)}
+              className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white text-xs placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={handleSaveScript}
+              disabled={!scriptName.trim()}
+              className="px-4 py-2 bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-50 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            >
+              Save Script
+            </button>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={uploading || !file}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+            >
+              {uploading ? "Processing..." : "Upload & Inject Scripts"}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -1097,12 +1204,37 @@ function WebsiteCloner() {
   const [url, setUrl] = useState("");
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [injectHead, setInjectHead] = useState("");
+  const [injectBodyStart, setInjectBodyStart] = useState("");
+  const [injectBodyEnd, setInjectBodyEnd] = useState("");
+  const [makeSafe, setMakeSafe] = useState(true);
+  const [showInject, setShowInject] = useState(false);
+  const [savedScripts, setSavedScripts] = useState<
+    { id: string; name: string; injectHead: string; injectBodyStart: string; injectBodyEnd: string }[]
+  >([]);
   const [result, setResult] = useState<{
     fileName: string;
     fileCount: number;
     totalSize: number;
     files: { path: string; size: number; type: string }[];
   } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/scripts")
+      .then((r) => r.json())
+      .then((d) => setSavedScripts(d.scripts || []))
+      .catch(() => {});
+  }, []);
+
+  const handleLoadScript = (id: string) => {
+    const s = savedScripts.find((x) => x.id === id);
+    if (s) {
+      setInjectHead(s.injectHead || "");
+      setInjectBodyStart(s.injectBodyStart || "");
+      setInjectBodyEnd(s.injectBodyEnd || "");
+    }
+  };
 
   const handleClone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1111,12 +1243,19 @@ function WebsiteCloner() {
     setCloning(true);
     setError("");
     setResult(null);
+    setSuccess("");
 
     try {
       const res = await fetch("/api/clone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          url,
+          makeSafe,
+          injectHead: injectHead || undefined,
+          injectBodyStart: injectBodyStart || undefined,
+          injectBodyEnd: injectBodyEnd || undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -1214,6 +1353,71 @@ function WebsiteCloner() {
         {error && (
           <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
             {error}
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 mb-4">
+          <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={makeSafe}
+              onChange={(e) => setMakeSafe(e.target.checked)}
+              className="rounded"
+            />
+            Anti-detection (remove tracking, comments, meta)
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowInject(!showInject)}
+            className="text-xs text-neutral-500 hover:text-neutral-300"
+          >
+            {showInject ? "Hide" : "Show"} Script Injection
+          </button>
+        </div>
+
+        {showInject && (
+          <div className="mb-4 space-y-3 p-4 bg-neutral-800/50 border border-neutral-700/50 rounded-lg">
+            {savedScripts.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                <span className="text-xs text-neutral-500">Load saved:</span>
+                {savedScripts.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleLoadScript(s.id)}
+                    className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded"
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <textarea
+              placeholder="Scripts to inject in <head> (CDN links, CSS)"
+              value={injectHead}
+              onChange={(e) => setInjectHead(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+            />
+            <textarea
+              placeholder="Scripts to inject after <body> (noscript, banners)"
+              value={injectBodyStart}
+              onChange={(e) => setInjectBodyStart(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+            />
+            <textarea
+              placeholder="Scripts to inject before </body> (JS, analytics)"
+              value={injectBodyEnd}
+              onChange={(e) => setInjectBodyEnd(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs font-mono placeholder-neutral-600 focus:outline-none focus:border-blue-500 resize-y"
+            />
           </div>
         )}
 
@@ -2290,6 +2494,8 @@ export default function CloakPage() {
 
   const [form, setForm] = useState({
     destinationUrl: "",
+    safePageUrl: "",
+    moneyPageUrl: "",
     slug: "",
     whitePageTitle: "Welcome",
     whitePageDescription: "Loading your content...",
@@ -2300,6 +2506,9 @@ export default function CloakPage() {
     redirectDelay: 3,
     cloakType: "redirect" as "redirect" | "iframe" | "meta-refresh",
     trafficFilter: defaultFilter,
+    blockFacebookReviewers: true,
+    blockTikTokReviewers: true,
+    blockGoogleReviewers: true,
   });
 
   const fetchLinks = useCallback(async () => {
@@ -2345,6 +2554,8 @@ export default function CloakPage() {
   const resetForm = () => {
     setForm({
       destinationUrl: "",
+      safePageUrl: "",
+      moneyPageUrl: "",
       slug: "",
       whitePageTitle: "Welcome",
       whitePageDescription: "Loading your content...",
@@ -2355,6 +2566,9 @@ export default function CloakPage() {
       redirectDelay: 3,
       cloakType: "redirect",
       trafficFilter: defaultFilter,
+      blockFacebookReviewers: true,
+      blockTikTokReviewers: true,
+      blockGoogleReviewers: true,
     });
     setShowAdvanced(false);
     setShowTraffic(false);
@@ -2399,6 +2613,11 @@ export default function CloakPage() {
       redirectDelay: link.redirectDelay,
       cloakType: link.cloakType,
       trafficFilter: link.trafficFilter || defaultFilter,
+      safePageUrl: (link as unknown as Record<string, unknown>).safePageUrl as string || "",
+      moneyPageUrl: (link as unknown as Record<string, unknown>).moneyPageUrl as string || "",
+      blockFacebookReviewers: (link as unknown as Record<string, unknown>).blockFacebookReviewers as boolean ?? true,
+      blockTikTokReviewers: (link as unknown as Record<string, unknown>).blockTikTokReviewers as boolean ?? true,
+      blockGoogleReviewers: (link as unknown as Record<string, unknown>).blockGoogleReviewers as boolean ?? true,
     });
     setShowAdvanced(true);
     setShowTraffic(true);
@@ -2566,6 +2785,75 @@ export default function CloakPage() {
                   }
                   className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 text-sm"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    Safe Page URL (for ad reviewers)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://safe-compliance-page.com"
+                    value={form.safePageUrl}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, safePageUrl: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 text-sm"
+                  />
+                  <p className="text-[10px] text-neutral-600 mt-1">Facebook/TikTok/Google reviewers see this page</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-300 mb-1.5">
+                    Money Page URL (for real users)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://your-offer-page.com"
+                    value={form.moneyPageUrl}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, moneyPageUrl: e.target.value }))
+                    }
+                    className="w-full px-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 text-sm"
+                  />
+                  <p className="text-[10px] text-neutral-600 mt-1">Real users from ads land here</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-neutral-800/50 border border-neutral-700/50 rounded-lg">
+                <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.blockFacebookReviewers}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, blockFacebookReviewers: e.target.checked }))
+                    }
+                    className="rounded"
+                  />
+                  Block Facebook Reviewers
+                </label>
+                <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.blockTikTokReviewers}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, blockTikTokReviewers: e.target.checked }))
+                    }
+                    className="rounded"
+                  />
+                  Block TikTok Reviewers
+                </label>
+                <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.blockGoogleReviewers}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, blockGoogleReviewers: e.target.checked }))
+                    }
+                    className="rounded"
+                  />
+                  Block Google Reviewers
+                </label>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

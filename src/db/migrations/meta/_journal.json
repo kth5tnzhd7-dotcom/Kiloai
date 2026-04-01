@@ -8,6 +8,20 @@
       "when": 1774905248720,
       "tag": "0000_mushy_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1775073142984,
+      "tag": "0001_illegal_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775076190015,
+      "tag": "0002_gigantic_abomination",
+      "breakpoints": true
     }
   ]
 }

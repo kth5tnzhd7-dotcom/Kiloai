@@ -7,7 +7,7 @@ import {
   deleteLink,
   toggleLink,
   updateLink,
-} from "@/lib/store";
+} from "@/lib/db-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const analytics = searchParams.get("analytics");
 
     if (slug && analytics === "true") {
-      const data = getAnalytics(slug);
+      const data = await getAnalytics(slug);
       if (!data) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (slug) {
-      const link = getLink(slug);
+      const link = await getLink(slug);
       if (!link) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ link });
     }
 
-    const links = getAllLinks();
+    const links = await getAllLinks();
     return NextResponse.json({ links });
   } catch {
     return NextResponse.json(
@@ -52,6 +52,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       destinationUrl,
+      safePageUrl,
+      moneyPageUrl,
       slug,
       whitePageTitle,
       whitePageDescription,
@@ -61,6 +63,17 @@ export async function POST(request: NextRequest) {
       maxClicks,
       redirectDelay,
       cloakType,
+      trafficBotMode,
+      trafficBotRedirectUrl,
+      trafficBlockedReferrers,
+      trafficAllowedReferrers,
+      trafficBlockedUserAgents,
+      trafficAllowedUserAgents,
+      geoAllowedCountries,
+      geoBlockedCountries,
+      blockFacebookReviewers,
+      blockTikTokReviewers,
+      blockGoogleReviewers,
     } = body;
 
     if (!destinationUrl) {
@@ -79,7 +92,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const link = createLink({
+    const link = await createLink({
       destinationUrl,
       slug: slug || undefined,
       whitePageTitle: whitePageTitle || "Welcome",
@@ -90,6 +103,12 @@ export async function POST(request: NextRequest) {
       maxClicks: maxClicks || undefined,
       redirectDelay: redirectDelay ?? undefined,
       cloakType: cloakType || undefined,
+      trafficBotMode: trafficBotMode || undefined,
+      trafficBotRedirectUrl: trafficBotRedirectUrl || undefined,
+      trafficBlockedReferrers: trafficBlockedReferrers || undefined,
+      trafficAllowedReferrers: trafficAllowedReferrers || undefined,
+      trafficBlockedUserAgents: trafficBlockedUserAgents || undefined,
+      trafficAllowedUserAgents: trafficAllowedUserAgents || undefined,
     });
 
     return NextResponse.json({ link }, { status: 201 });
@@ -114,7 +133,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "toggle") {
-      const link = toggleLink(slug);
+      const link = await toggleLink(slug);
       if (!link) {
         return NextResponse.json(
           { error: "Link not found" },
@@ -125,7 +144,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const link = updateLink(slug, body);
+    const link = await updateLink(slug, body);
     if (!link) {
       return NextResponse.json(
         { error: "Link not found" },
@@ -153,7 +172,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const deleted = deleteLink(slug);
+    const deleted = await deleteLink(slug);
     if (!deleted) {
       return NextResponse.json(
         { error: "Link not found" },

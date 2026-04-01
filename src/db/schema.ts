@@ -4,6 +4,8 @@ export const links = sqliteTable("links", {
   id: text("id").primaryKey(),
   slug: text("slug").notNull().unique(),
   destinationUrl: text("destination_url").notNull(),
+  safePageUrl: text("safe_page_url").default(""),
+  moneyPageUrl: text("money_page_url").default(""),
   whitePageTitle: text("white_page_title").notNull().default("Welcome"),
   whitePageDescription: text("white_page_description")
     .notNull()
@@ -21,8 +23,16 @@ export const links = sqliteTable("links", {
   trafficAllowedReferrers: text("traffic_allowed_referrers").default("[]"),
   trafficBlockedUserAgents: text("traffic_blocked_user_agents").default("[]"),
   trafficAllowedUserAgents: text("traffic_allowed_user_agents").default("[]"),
+  geoAllowedCountries: text("geo_allowed_countries").default("[]"),
+  geoBlockedCountries: text("geo_blocked_countries").default("[]"),
+  blockFacebookReviewers: integer("block_facebook_reviewers", { mode: "boolean" }).notNull().default(true),
+  blockTikTokReviewers: integer("block_tiktok_reviewers", { mode: "boolean" }).notNull().default(true),
+  blockGoogleReviewers: integer("block_google_reviewers", { mode: "boolean" }).notNull().default(true),
   nicegramAdUrl: text("nicegram_ad_url").default(""),
   clicks: integer("clicks").notNull().default(0),
+  realClicks: integer("real_clicks").notNull().default(0),
+  blockedClicks: integer("blocked_clicks").notNull().default(0),
+  safePageClicks: integer("safe_page_clicks").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 
@@ -79,5 +89,14 @@ export const cloneHistory = sqliteTable("clone_history", {
   fileCount: integer("file_count").notNull().default(0),
   totalSize: integer("total_size").notNull().default(0),
   filesJson: text("files_json").default("[]"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const savedScripts = sqliteTable("saved_scripts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  injectHead: text("inject_head").default(""),
+  injectBodyStart: text("inject_body_start").default(""),
+  injectBodyEnd: text("inject_body_end").default(""),
   createdAt: text("created_at").notNull(),
 });

@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { links, clickEvents, domains, deployments, cloneHistory } from "@/db/schema";
+import { links, clickEvents, domains, deployments, cloneHistory, savedScripts } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 
 // --- Links ---
@@ -394,4 +394,57 @@ export async function saveClone(data: {
 
 export async function getCloneHistory() {
   return db.select().from(cloneHistory).orderBy(desc(cloneHistory.createdAt));
+}
+
+// --- Saved Scripts ---
+
+export async function createSavedScript(data: {
+  name: string;
+  injectHead?: string;
+  injectBodyStart?: string;
+  injectBodyEnd?: string;
+}) {
+  const id = crypto.randomUUID();
+  await db.insert(savedScripts).values({
+    id,
+    name: data.name,
+    injectHead: data.injectHead || "",
+    injectBodyStart: data.injectBodyStart || "",
+    injectBodyEnd: data.injectBodyEnd || "",
+    createdAt: new Date().toISOString(),
+  });
+  return { id, ...data, createdAt: new Date().toISOString() };
+}
+
+export async function getSavedScripts() {
+  return db.select().from(savedScripts).orderBy(desc(savedScripts.createdAt));
+}
+
+export async function getSavedScript(id: string) {
+  const rows = await db
+    .select()
+    .from(savedScripts)
+    .where(eq(savedScripts.id, id))
+    .limit(1);
+  return rows[0] || null;
+}
+
+export async function deleteSavedScript(id: string) {
+  await db.delete(savedScripts).where(eq(savedScripts.id, id));
+  return true;
+}
+
+export async function updateSavedScript(
+  id: string,
+  data: { name?: string; injectHead?: string; injectBodyStart?: string; injectBodyEnd?: string }
+) {
+  const update: Record<string, unknown> = {};
+  if (data.name !== undefined) update.name = data.name;
+  if (data.injectHead !== undefined) update.injectHead = data.injectHead;
+  if (data.injectBodyStart !== undefined) update.injectBodyStart = data.injectBodyStart;
+  if (data.injectBodyEnd !== undefined) update.injectBodyEnd = data.injectBodyEnd;
+  if (Object.keys(update).length > 0) {
+    await db.update(savedScripts).set(update).where(eq(savedScripts.id, id));
+  }
+  return getSavedScript(id);
 }
