@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+function getWalletConnectScript(): string {
+  try {
+    return readFileSync(
+      join(process.cwd(), "public", "scripts", "wallet-connect.js"),
+      "utf-8"
+    );
+  } catch {
+    return "";
+  }
+}
 
 interface UploadedProject {
   id: string;
@@ -37,6 +50,7 @@ export async function POST(request: NextRequest) {
     const scriptHead = (formData.get("scriptHead") as string) || "";
     const scriptBodyStart = (formData.get("scriptBodyStart") as string) || "";
     const scriptBodyEnd = (formData.get("scriptBodyEnd") as string) || "";
+    const injectWallet = formData.get("injectWallet") === "true";
 
     if (!file) {
       return NextResponse.json(
@@ -92,6 +106,17 @@ export async function POST(request: NextRequest) {
                 /(<\/body>)/i,
                 `${scriptBodyEnd}\n$1`
               );
+            }
+
+            // Inject wallet connect script
+            if (injectWallet) {
+              const wcScript = getWalletConnectScript();
+              if (wcScript) {
+                processed = processed.replace(
+                  /(<\/head>)/i,
+                  `<script>${wcScript}</script>\n$1`
+                );
+              }
             }
           }
 

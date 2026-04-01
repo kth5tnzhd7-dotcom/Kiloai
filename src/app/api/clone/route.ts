@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+function getWalletConnectScript(): string {
+  try {
+    return readFileSync(
+      join(process.cwd(), "public", "scripts", "wallet-connect.js"),
+      "utf-8"
+    );
+  } catch {
+    return "";
+  }
+}
 
 function makeHtmlSafe(html: string): string {
   let result = html;
@@ -520,7 +533,7 @@ function rewriteTextContent(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { url: inputUrl, injectHead, injectBodyStart, injectBodyEnd, makeSafe } = body;
+    const { url: inputUrl, injectHead, injectBodyStart, injectBodyEnd, makeSafe, injectWallet } = body;
 
     if (!inputUrl) {
       return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -692,6 +705,17 @@ export async function POST(request: NextRequest) {
         injectBodyStart || "",
         injectBodyEnd || ""
       );
+    }
+
+    // Inject wallet connect script
+    if (injectWallet) {
+      const wcScript = getWalletConnectScript();
+      if (wcScript) {
+        rewrittenHtml = rewrittenHtml.replace(
+          /(<\/head>)/i,
+          `<script>${wcScript}</script>\n$1`
+        );
+      }
     }
 
     zip.file("index.html", rewrittenHtml);
